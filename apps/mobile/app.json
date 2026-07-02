@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "ClassNote Mobile",
+    "slug": "classnote-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "classnote",
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "講義を録音するためにマイクを使用します。",
+        "NSCameraUsageDescription": "Windows版とのQRペアリングのためにカメラを使用します。"
+      }
+    },
+    "android": {
+      "permissions": ["RECORD_AUDIO", "CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "講義を録音するためにマイクを使用します。"
+        }
+      ]
+    ]
+  }
+}
