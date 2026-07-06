@@ -2,3 +2,5 @@ node_modules/
 .next/
 *.tsbuildinfo
 data/lectures/
+.env
+.env*.local

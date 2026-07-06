@@ -25,12 +25,29 @@ export const providerDefaults: Record<Exclude<LlmProvider, "mock">, { endpoint: 
   local:      { endpoint: "http://localhost:1234/v1",                 model: "local-model",              needsKey: false },
 };
 
+function getEnvApiKey(provider: LlmProvider): string {
+  if (typeof process === "undefined" || !process.env) return "";
+  const key = `NEXT_PUBLIC_${provider.toUpperCase()}_API_KEY`;
+  return (process.env as Record<string, string | undefined>)[key] ?? "";
+}
+
 export function loadLlmSettings(): LlmSettings {
   if (typeof window === "undefined") return defaultLlmSettings;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultLlmSettings;
-    return JSON.parse(raw) as LlmSettings;
+    const saved = raw ? JSON.parse(raw) as LlmSettings : null;
+    if (!saved) {
+      const groqKey = getEnvApiKey("groq");
+      if (groqKey) {
+        return { provider: "groq", apiKey: groqKey, ...providerDefaults.groq };
+      }
+      return defaultLlmSettings;
+    }
+    if (!saved.apiKey) {
+      const envKey = getEnvApiKey(saved.provider);
+      if (envKey) saved.apiKey = envKey;
+    }
+    return saved;
   } catch {
     return defaultLlmSettings;
   }
