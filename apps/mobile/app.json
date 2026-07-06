@@ -1,10 +1,12 @@
 {
   "expo": {
+    "owner": "das1s-team",
     "name": "ClassNote Mobile",
     "slug": "classnote-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "runtimeVersion": "expo",
     "scheme": "classnote",
     "icon": "./assets/icon.png",
     "ios": {
