@@ -42,16 +42,12 @@ jobs:
 
       - name: Build
         run: |
-          set -o pipefail
-          eas build --platform android --profile preview --non-interactive --wait 2>&1 | tee /tmp/build.log
+          eas build --platform android --profile preview --non-interactive --wait > /tmp/build.out 2>&1
+          exit_code=$?
+          echo "Build exit code: $exit_code"
+          if [ $exit_code -ne 0 ]; then
+            echo "::error title=EAS Build Error::$(cat /tmp/build.out 2>/dev/null | head -c 500)"
+          fi
+          cat /tmp/build.out 2>/dev/null || echo "(empty output)"
+          exit $exit_code
         timeout-minutes: 60
-
-      - name: Print build log
-        if: always()
-        run: |
-          echo "=== BUILD LOG ==="
-          cat /tmp/build.log 2>/dev/null || echo "(no log file)"
-          echo "=== STEP SUMMARY ==="
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat /tmp/build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
