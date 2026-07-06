@@ -15,13 +15,11 @@
     },
     "preview": {
       "distribution": "internal",
-      "projectRootDirectory": "apps/mobile",
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
-      "projectRootDirectory": "apps/mobile",
       "android": {
         "buildType": "app-bundle"
       }
