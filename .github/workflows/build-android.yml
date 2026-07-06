@@ -32,38 +32,22 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Setup Expo
-        run: |
-          npm install -g eas-cli
-          echo "EXPO_TOKEN=${{ secrets.EXPO_TOKEN }}" >> $GITHUB_ENV
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Verify setup
-        run: |
-          which eas
-          eas --version
-          ls -la ~/.expo/ 2>/dev/null || echo "No .expo dir"
-          echo "Token set: $(test -n \"$EXPO_TOKEN\" && echo yes || echo no)"
+      - name: EAS version
+        run: eas --version
 
-      - name: Validate project
+      - name: Build (capture output)
         run: |
-          eas build:version:list --platform android 2>&1 || echo "list not available"
-          npx expo config --type public 2>&1 | head -20 || true
-
-      - name: Build Android (preview APK)
-        run: |
-          eas build --platform android --profile preview --non-interactive --no-wait 2>&1
-        timeout-minutes: 5
-
-      - name: Check for created build
-        run: |
-          for i in 1 2 3 4 5; do
-            sleep 10
-            curl -s "https://api.expo.dev/graphql" \
-              -H "Authorization: Bearer $EXPO_TOKEN" \
-              -H "Content-Type: application/json" \
-              --max-time 5 \
-              -d '{"query":"{app{byId(appId:\"d6a3a075-11cb-44f7-ab93-1d23d283e97e\"){builds(offset:0,limit:3){id platform status}}}}"}' | \
-              python3 -m json.tool
-            echo "---"
-          done
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          set -o pipefail
+          eas build --platform android --profile preview --non-interactive --wait 2>&1 | tee /tmp/build.log
+          status=$?
+          echo "### Build Log" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/build.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit $status
+        timeout-minutes: 60
