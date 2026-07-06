@@ -42,29 +42,16 @@ jobs:
 
       - name: Build Android (preview APK)
         run: |
-          eas build --platform android --profile preview --non-interactive --wait --json 2>&1 | tee /tmp/eas-output.json
+          set -o pipefail
+          eas build --platform android --profile preview --non-interactive --wait 2>&1 | tee /tmp/eas-output.txt
         timeout-minutes: 60
 
-      - name: Check build result
-        if: always()
-        run: |
-          echo "=== EAS Output ==="
-          cat /tmp/eas-output.json
-          echo "=== Builds found ==="
-          curl -s "https://api.expo.dev/graphql" \
-            -H "Authorization: Bearer $EXPO_TOKEN" \
-            -H "Content-Type: application/json" \
-            --max-time 10 \
-            -d '{"query":"{app{byId(appId:\"d6a3a075-11cb-44f7-ab93-1d23d283e97e\"){builds(offset:0,limit:5){id platform status createdAt}}}}"' | \
-            python3 -c "import json,sys; d=json.load(sys.stdin); b=d.get('data',{}).get('app',{}).get('byId',{}).get('builds',[]); print(f'{len(b)} builds'); [print(f'  {x[\"id\"]} {x[\"platform\"]} {x[\"status\"]}') for x in b]"
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
       - name: Upload EAS log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eas-output
-          path: /tmp/eas-output.json
+          path: /tmp/eas-output.txt
 
       - name: Build Android (production AAB)
         if: false
