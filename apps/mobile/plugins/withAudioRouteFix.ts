@@ -6,18 +6,16 @@ const withAudioRouteFixIos: ConfigPlugin = (config) =>
   withDangerousMod(config, [
     "ios",
     async (iosConfig) => {
-      const filePath = path.join(
-        iosConfig.modRequest.projectRoot,
-        "node_modules",
-        "expo-av",
-        "ios",
-        "EXAV",
-        "EXAV.m"
-      );
+      const projectRoot = iosConfig.modRequest.projectRoot;
+      const paths = [
+        path.join(projectRoot, "node_modules", "expo-av", "ios", "EXAV", "EXAV.m"),
+        path.join(projectRoot, "..", "node_modules", "expo-av", "ios", "EXAV", "EXAV.m"),
+      ];
+      const filePath = paths.find((p) => fs.existsSync(p));
 
-      if (!fs.existsSync(filePath)) {
+      if (!filePath) {
         throw new Error(
-          `expo-av EXAV.m not found at ${filePath}. Is expo-av installed?`
+          `expo-av EXAV.m not found. Is expo-av installed?`
         );
       }
 
@@ -51,23 +49,16 @@ const withAudioRouteFixAndroid: ConfigPlugin = (config) =>
   withDangerousMod(config, [
     "android",
     async (androidConfig) => {
-      const filePath = path.join(
-        androidConfig.modRequest.projectRoot,
-        "node_modules",
-        "expo-av",
-        "android",
-        "src",
-        "main",
-        "java",
-        "expo",
-        "modules",
-        "av",
-        "AVManager.java"
-      );
+      const projectRoot = androidConfig.modRequest.projectRoot;
+      const paths = [
+        path.join(projectRoot, "node_modules", "expo-av", "android", "src", "main", "java", "expo", "modules", "av", "AVManager.java"),
+        path.join(projectRoot, "..", "node_modules", "expo-av", "android", "src", "main", "java", "expo", "modules", "av", "AVManager.java"),
+      ];
+      const filePath = paths.find((p) => fs.existsSync(p));
 
-      if (!fs.existsSync(filePath)) {
+      if (!filePath) {
         throw new Error(
-          `expo-av AVManager.java not found at ${filePath}. Is expo-av installed?`
+          `expo-av AVManager.java not found. Is expo-av installed?`
         );
       }
 
