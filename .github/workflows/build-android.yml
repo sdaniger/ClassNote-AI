@@ -37,51 +37,34 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Debug EAS
-        run: |
-          echo "=== EAS version ==="
-          eas --version
-          echo "=== EAS node path ==="
-          which eas
-          echo "=== node version ==="
-          node --version
-          echo "=== EXPO_TOKEN exists ==="
-          test -n "$EXPO_TOKEN" && echo "yes" || echo "no"
-          echo "=== Expo auth file ==="
-          cat ~/.expo/config.json 2>/dev/null || echo "no config file"
+      - name: EAS version
+        run: eas --version
 
-      - name: Build Android (preview APK) - with --wait
+      - name: Build Android (preview APK)
         run: |
-          eas build --platform android --profile preview --non-interactive --no-wait --json 2>&1 | tee /tmp/eas-output.json || true
-          echo "Exit code: $?"
-          echo "=== Output ==="
+          eas build --platform android --profile preview --non-interactive --wait --json 2>&1 | tee /tmp/eas-output.json
+        timeout-minutes: 60
+
+      - name: Check build result
+        if: always()
+        run: |
+          echo "=== EAS Output ==="
           cat /tmp/eas-output.json
+          echo "=== Builds found ==="
+          curl -s "https://api.expo.dev/graphql" \
+            -H "Authorization: Bearer $EXPO_TOKEN" \
+            -H "Content-Type: application/json" \
+            --max-time 10 \
+            -d '{"query":"{app{byId(appId:\"d6a3a075-11cb-44f7-ab93-1d23d283e97e\"){builds(offset:0,limit:5){id platform status createdAt}}}}"' | \
+            python3 -c "import json,sys; d=json.load(sys.stdin); b=d.get('data',{}).get('app',{}).get('byId',{}).get('builds',[]); print(f'{len(b)} builds'); [print(f'  {x[\"id\"]} {x[\"platform\"]} {x[\"status\"]}') for x in b]"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Upload EAS log
         uses: actions/upload-artifact@v4
         with:
           name: eas-output
           path: /tmp/eas-output.json
-
-      - name: Wait for builds
-        run: |
-          # Check build every 30s for up to 5 min
-          for i in $(seq 1 10); do
-            sleep 30
-            BUILDS=$(curl -s "https://api.expo.dev/graphql" \
-              -H "Authorization: Bearer $EXPO_TOKEN" \
-              -H "Content-Type: application/json" \
-              --max-time 10 \
-              -d '{"query":"{app{byId(appId:\"d6a3a075-11cb-44f7-ab93-1d23d283e97e\"){builds(offset:0,limit:5){id platform status createdAt}}}}"' | \
-              python3 -c "import json,sys; d=json.load(sys.stdin); b=d.get('data',{}).get('app',{}).get('byId',{}).get('builds',[]); print(f'{len(b)} builds'); [print(f'  {x[\"id\"]} {x[\"platform\"]} {x[\"status\"]}') for x in b]")
-            echo "Poll $i: $BUILDS"
-            if echo "$BUILDS" | grep -qv "0 builds"; then
-              echo "BUILD(S) FOUND!"
-              break
-            fi
-          done
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android (production AAB)
         if: false
