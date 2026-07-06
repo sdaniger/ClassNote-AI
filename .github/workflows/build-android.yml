@@ -34,6 +34,10 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Expo prebuild
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --non-interactive
+
       - name: Build Android (preview APK)
         working-directory: apps/mobile
         env:
