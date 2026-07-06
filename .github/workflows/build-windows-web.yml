@@ -3,11 +3,7 @@ name: Build Windows (Web Standalone)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths-ignore:
-      - "apps/mobile/**"
-      - "docs/**"
-      - ".github/workflows/build-android.yml"
+    branches: [main, master]
 
 concurrency:
   group: windows-${{ github.ref }}
