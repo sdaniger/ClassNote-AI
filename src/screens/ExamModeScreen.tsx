@@ -1,0 +1,9 @@
+import { GlassButton } from "@/components/GlassButton";
+import { GlassCard } from "@/components/GlassCard";
+import { ScreenHeader } from "@/components/common/ScreenHeader";
+import { MiniStat } from "@/components/common/MiniStat";
+import type { Course, ReviewQueueItem, StudyCard, QuizQuestion, WeakPoint } from "@/types/lecture";
+
+export function ExamModeScreen({ cards, questions, weakPoints, queue, courses, onOpenLecture, onBack }: { cards: StudyCard[]; questions: QuizQuestion[]; weakPoints: WeakPoint[]; queue: ReviewQueueItem[]; courses: Course[]; onOpenLecture: (lectureId: string, timestamp?: number) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Exam" title="テスト前モード" description="試験前に見るべき内容を優先度順にまとめます。" onBack={onBack} /><GlassCard className="p-5"><h3 className="text-lg font-bold">科目ごとの優先度</h3><div className="mt-3 space-y-2">{courses.map((course) => <p key={course.id} className="flex justify-between rounded-2xl bg-white/60 px-3 py-3 text-sm font-bold"><span>{course.name}</span><span>{course.examLikelyPointCount + course.confusingMarkerCount} pt</span></p>)}</div></GlassCard><GlassCard solid className="p-4"><h3 className="text-lg font-bold">テスト前に見るべき内容</h3><div className="mt-3 space-y-2">{[...queue.filter((item) => item.type === "exam_likely"), ...weakPoints.map((weak) => ({ id: weak.id, title: weak.title, description: weak.description, lectureId: weak.lectureId, timestamp: weak.timestamp }))].slice(0, 8).map((item) => <button key={item.id} onClick={() => onOpenLecture(item.lectureId, item.timestamp)} className="w-full rounded-2xl bg-slate-50 p-3 text-left text-sm leading-6 text-slate-700"><b>{item.title}</b><br />{item.description}</button>)}</div></GlassCard><div className="grid grid-cols-2 gap-3"><MiniStat label="カード" value={`${cards.length}`} /><MiniStat label="問題" value={`${questions.length}`} /></div></div>;
+}

@@ -4,7 +4,7 @@ import { RetryButton } from "./RetryButton";
 
 export function ErrorCard({ title = "問題が発生しました", message, actionLabel, onRetry }: { title?: string; message: string; actionLabel?: string; onRetry?: () => void }) {
   return (
-    <GlassCard solid className="p-5">
+    <GlassCard solid className="p-5" role="alert" aria-live="polite">
       <div className="flex gap-3">
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-rose-50 text-rose-600">
           <AlertTriangle className="h-5 w-5" />

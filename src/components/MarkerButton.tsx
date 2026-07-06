@@ -23,8 +23,8 @@ const activeToneClass = {
 export function MarkerButton({ label, icon: Icon, tone, onClick, active = false }: MarkerButtonProps) {
   const cls = active ? activeToneClass[tone] : toneClass[tone];
   return (
-    <button onClick={onClick} className={`flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-[24px] bg-gradient-to-br text-sm font-bold shadow-[0_14px_34px_rgba(15,23,42,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.96] ${cls}`}>
-      <Icon className="h-5 w-5" />
+    <button onClick={onClick} aria-label={label} className={`flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-[24px] bg-gradient-to-br text-sm font-bold shadow-[0_14px_34px_rgba(15,23,42,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.96] ${cls}`}>
+      <Icon className="h-5 w-5" aria-hidden />
       {label}
     </button>
   );

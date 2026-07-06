@@ -14,6 +14,9 @@ export function GlassButton({ children, onPress, variant = "secondary", disabled
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessible
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [styles.button, styles[variant], disabled && styles.disabled, pressed && !disabled && styles.pressed, style]}
     >
       <Text style={[styles.text, variant === "primary" || variant === "danger" ? styles.textLight : styles.textDark]}>{children}</Text>

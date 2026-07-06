@@ -18,7 +18,7 @@ export function RecordingOrb({ active }: { active: boolean }) {
   }, [active, pulse]);
 
   return (
-    <View style={styles.wrap}>
+    <View style={styles.wrap} accessible accessibilityLabel={active ? "録音中" : "録音準備完了"}>
       <Animated.View style={[styles.ring, { transform: [{ scale: pulse }] }]} />
       <View style={styles.orb}>
         <Text style={styles.mic}>●</Text>

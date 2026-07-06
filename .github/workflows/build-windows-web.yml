@@ -32,11 +32,6 @@ jobs:
       - name: Build standalone artifact
         run: npm run build:standalone
 
-      - name: Copy public & static assets
-        run: |
-          cp -r public .next/standalone/public 2>/dev/null || true
-          cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

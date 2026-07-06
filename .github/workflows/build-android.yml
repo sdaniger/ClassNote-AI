@@ -38,7 +38,8 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android (preview APK)
-        run: eas build --platform android --profile preview --non-interactive --no-wait
+        run: eas build --platform android --profile preview --non-interactive --wait
+        timeout-minutes: 60
 
       - name: Build Android (production AAB)
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'

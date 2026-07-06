@@ -1,7 +1,7 @@
 node_modules/
 .next/
 *.tsbuildinfo
-data/lectures/
+data/
 .env
 .env*.local
 

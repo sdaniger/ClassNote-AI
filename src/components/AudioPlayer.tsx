@@ -1,5 +1,6 @@
 "use client";
 
+import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { loadAudio } from "@/services/recording/recordingStorage";
@@ -9,9 +10,10 @@ type AudioPlayerProps = {
   onTimeUpdate?: (timeSec: number) => void;
   jumpTimestamp?: number;
   onClearJump?: () => void;
+  togglePlayRef?: MutableRefObject<(() => void) | null>;
 };
 
-export function AudioPlayer({ audioKey, onTimeUpdate, jumpTimestamp, onClearJump }: AudioPlayerProps) {
+export function AudioPlayer({ audioKey, onTimeUpdate, jumpTimestamp, onClearJump, togglePlayRef }: AudioPlayerProps) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +98,10 @@ export function AudioPlayer({ audioKey, onTimeUpdate, jumpTimestamp, onClearJump
       audioRef.current.pause();
     }
   }, []);
+
+  useEffect(() => {
+    if (togglePlayRef) togglePlayRef.current = togglePlay;
+  }, [togglePlay, togglePlayRef]);
 
   const skip = useCallback((delta: number) => {
     if (!audioRef.current) return;
