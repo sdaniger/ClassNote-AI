@@ -42,7 +42,7 @@ jobs:
 
       - name: Build Android (preview APK)
         run: |
-          eas build --platform android --profile preview --non-interactive --wait 2>&1
+          eas build --platform android --profile preview --non-interactive --wait --verbose 2>&1
         timeout-minutes: 60
 
       - name: Build Android (production AAB)
