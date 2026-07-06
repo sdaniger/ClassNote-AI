@@ -31,20 +31,17 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: EAS version
-        run: eas --version
-
-      - name: Build (debug)
+      - name: Setup EAS CLI
         run: |
-          set -x
+          npm install -g eas-cli
+          which eas
+          eas --version
+
+      - name: Build Android
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
           eas build --platform android --profile preview --non-interactive --wait > /tmp/build.out 2>&1; rc=$?
-          set +x
           echo "Exit code: $rc"
           echo "Output size: $(wc -c < /tmp/build.out) bytes"
           echo "=== Build output ==="
