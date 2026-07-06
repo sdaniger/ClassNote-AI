@@ -31,25 +31,30 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Build Android
+      - name: Collect info
+        id: collect
+        continue-on-error: true
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          > /tmp/build.out
-          echo "=== node version ===" >> /tmp/build.out
-          node -e "console.log(process.versions)" >> /tmp/build.out 2>&1
-          echo "=== which eas ===" >> /tmp/build.out
-          which eas >> /tmp/build.out 2>&1
-          echo "=== Directory ===" >> /tmp/build.out
-          pwd >> /tmp/build.out 2>&1
-          ls -la >> /tmp/build.out 2>&1
-          echo "=== eas whoami ===" >> /tmp/build.out
-          npx -y eas-cli@latest whoami >> /tmp/build.out 2>&1
-          echo "=== eas build ===" >> /tmp/build.out
-          npx -y eas-cli@latest build --platform android --profile preview --non-interactive --no-wait >> /tmp/build.out 2>&1; rc=$?
-          echo "Exit code: $rc" >> /tmp/build.out
-          echo "=== posting to dpaste ==="
+          {
+            echo "=== node version ==="
+            node -e "console.log(process.versions)"
+            echo "=== which eas ==="
+            which eas
+            echo "=== Directory ==="
+            pwd; ls -la
+            echo "=== eas whoami ==="
+            npx -y eas-cli@latest whoami
+            echo "=== eas build ==="
+            npx -y eas-cli@latest build --platform android --profile preview --non-interactive --no-wait; echo "Exit: $?"
+          } > /tmp/build.out 2>&1
+
+      - name: Upload output to dpaste
+        if: always()
+        run: |
           curl -s -X POST "https://dpaste.com/api/v2/" \
             -F "content=@/tmp/build.out" \
             -F "expiry_days=7" \
-            -F "syntax=text"
+            -F "syntax=text" \
+            -w "\n"
