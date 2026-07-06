@@ -9,7 +9,7 @@ const withAudioRouteFixIos: ConfigPlugin = (config) =>
       const projectRoot = iosConfig.modRequest.projectRoot;
       const paths = [
         path.join(projectRoot, "node_modules", "expo-av", "ios", "EXAV", "EXAV.m"),
-        path.join(projectRoot, "..", "node_modules", "expo-av", "ios", "EXAV", "EXAV.m"),
+        path.join(projectRoot, "..", "..", "node_modules", "expo-av", "ios", "EXAV", "EXAV.m"),
       ];
       const filePath = paths.find((p) => fs.existsSync(p));
 
@@ -52,7 +52,7 @@ const withAudioRouteFixAndroid: ConfigPlugin = (config) =>
       const projectRoot = androidConfig.modRequest.projectRoot;
       const paths = [
         path.join(projectRoot, "node_modules", "expo-av", "android", "src", "main", "java", "expo", "modules", "av", "AVManager.java"),
-        path.join(projectRoot, "..", "node_modules", "expo-av", "android", "src", "main", "java", "expo", "modules", "av", "AVManager.java"),
+        path.join(projectRoot, "..", "..", "node_modules", "expo-av", "android", "src", "main", "java", "expo", "modules", "av", "AVManager.java"),
       ];
       const filePath = paths.find((p) => fs.existsSync(p));
 
