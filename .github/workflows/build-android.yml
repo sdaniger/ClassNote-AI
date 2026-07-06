@@ -31,12 +31,13 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: EAS version
-        run: eas --version
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build Android
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Build Android (preview APK)
         run: |
-          eas build --platform android --profile preview --non-interactive --no-wait 2>&1; echo "exit_code: $?"
+          eas build --platform android --profile preview --non-interactive --wait 2>&1
         timeout-minutes: 60
