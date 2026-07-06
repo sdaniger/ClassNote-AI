@@ -1,1 +1,1 @@
-export { formatDuration, formatTimestamp, formatJapaneseDate } from "../../shared/formatTime";
+export { formatDuration, formatTimestamp, formatJapaneseDate } from "@shared/formatTime";
