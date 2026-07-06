@@ -40,12 +40,16 @@ jobs:
       - name: Build Android
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_DEBUG: true
         run: |
           eas build --platform android --profile preview --non-interactive --wait > /tmp/build.out 2>&1; rc=$?
-          echo "Exit code: $rc"
-          echo "Output size: $(wc -c < /tmp/build.out) bytes"
-          echo "=== Build output ==="
-          cat /tmp/build.out
-          echo "=== End ==="
+          {
+            echo "### EAS Build Result"
+            echo "Exit code: $rc"
+            echo "Output size: $(wc -c < /tmp/build.out)"
+            echo '```'
+            cat /tmp/build.out
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
           exit $rc
         timeout-minutes: 60
