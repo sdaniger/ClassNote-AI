@@ -13,7 +13,11 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "mobile:start": "npm --workspace apps/mobile run start",
-    "mobile:typecheck": "npm --workspace apps/mobile run typecheck"
+    "mobile:typecheck": "npm --workspace apps/mobile run typecheck",
+    "mobile:android": "npm --workspace apps/mobile run android",
+    "build:web": "next build",
+    "build:standalone": "next build && cp -r public .next/standalone/public 2>/dev/null; cp -r .next/static .next/standalone/.next/static 2>/dev/null",
+    "server": "node .next/standalone/server.js"
   },
   "keywords": [],
   "author": "",

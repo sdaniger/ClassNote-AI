@@ -1,8 +1,13 @@
 import type { Lecture, LectureMarker, LectureNote, LectureQuizItem, LectureTimelineItem, TranscriptSegment } from "@/types/lecture";
 import { chunkTranscript } from "./chunkTranscript";
+import { completeChat } from "@/lib/llm/llmClient";
+import { buildSummaryPrompt } from "@/lib/llm/llmPrompts";
+import { loadLlmSettings } from "@/lib/llm/llmSettings";
+import type { LlmSettings } from "@/lib/llm/llmSettings";
 
 export type GenerateLectureSummaryOptions = {
-  provider?: "mock" | "openai" | "ollama" | "local";
+  provider?: LlmSettings["provider"];
+  llmSettings?: LlmSettings;
 };
 
 export async function generateLectureSummary(
@@ -14,12 +19,61 @@ export async function generateLectureSummary(
   if (transcript.length === 0) throw new Error("transcript.json が空です。先に文字起こしを完了してください。");
 
   const provider = options.provider ?? "mock";
-  if (provider !== "mock") {
-    throw new Error("このプロトタイプではmock要約のみ有効です。後でLLM providerを差し替えられます。");
-  }
 
   const chunks = chunkTranscript(transcript, { maxDurationSec: 600, maxChars: 2800 });
   if (chunks.length === 0) throw new Error("要約に使える文字起こしがありません。");
+
+  const fullText = transcript.map((s) => `[${Math.floor(s.start / 60)}:${String(Math.floor(s.start % 60)).padStart(2, "0")}] ${s.text}`).join("\n");
+
+  if (provider !== "mock") {
+    const settings = options.llmSettings ?? loadLlmSettings();
+    const prompt = buildSummaryPrompt(fullText);
+
+    const content = await completeChat(settings, [
+      { role: "system", content: prompt.system },
+      { role: "user", content: prompt.user },
+    ], {
+      temperature: 0.3,
+      maxTokens: 4096,
+      responseFormat: { type: "json_object" },
+    });
+
+    let parsed: {
+      summary?: string;
+      keyPoints?: string[];
+      examLikelyPoints?: string[];
+      timeline?: { start: number; title: string; description: string }[];
+      quiz?: { question: string; answer: string }[];
+    };
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new Error("LLMの応答のパースに失敗しました。もう一度試してください。");
+    }
+
+    const confusingParts = generateConfusingPartsExplanation(transcript, markers);
+
+    return {
+      lectureId: lecture.id,
+      summary: parsed.summary ?? "",
+      keyPoints: parsed.keyPoints ?? [],
+      examLikelyPoints: parsed.examLikelyPoints ?? [],
+      timeline: (parsed.timeline ?? []).map((item) => ({
+        start: item.start,
+        title: item.title,
+        description: item.description,
+      })),
+      quiz: (parsed.quiz ?? []).map((item) => ({
+        question: item.question,
+        answer: item.answer,
+      })),
+      confusingParts,
+      reviewChecklist: [],
+      generatedAt: new Date().toISOString(),
+      jsonPath: `data/lectures/${lecture.id}/notes/lecture-note.json`,
+      markdownPath: `data/lectures/${lecture.id}/notes/lecture-note.md`,
+    };
+  }
 
   const keyPoints = generateKeyPoints(transcript);
   const timeline = generateTimeline(transcript);

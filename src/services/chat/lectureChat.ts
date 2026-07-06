@@ -1,5 +1,8 @@
 import type { ChatAnswer, ChatReference, Lecture, LectureMarker, LectureNote, TranscriptSegment } from "@/types/lecture";
 import { buildLectureContext } from "./buildLectureContext";
+import { completeChat } from "@/lib/llm/llmClient";
+import { buildChatPrompt } from "@/lib/llm/llmPrompts";
+import { loadLlmSettings } from "@/lib/llm/llmSettings";
 
 export async function answerLectureQuestion(input: {
   lecture: Lecture;
@@ -22,6 +25,27 @@ export async function answerLectureQuestion(input: {
     text: snippet.text,
     source: snippet.source,
   }));
+
+  const settings = loadLlmSettings();
+  if (settings.provider !== "mock") {
+    const contextText = snippets.map((s) =>
+      s.timestamp != null
+        ? `[${Math.floor(s.timestamp / 60)}:${String(Math.floor(s.timestamp % 60)).padStart(2, "0")}] ${s.text}`
+        : s.text
+    ).join("\n\n");
+    const prompt = buildChatPrompt(contextText, input.question);
+
+    const content = await completeChat(settings, [
+      { role: "system", content: prompt.system },
+      { role: "user", content: prompt.user },
+    ], { temperature: 0.5, maxTokens: 1024 });
+
+    return {
+      message: content,
+      references,
+      suggestedFollowups: [],
+    };
+  }
 
   const message = `文字起こしから関連箇所を ${references.length} 件見つけました。AI回答は後日差し替え予定です。`;
 

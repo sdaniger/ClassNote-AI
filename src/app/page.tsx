@@ -61,7 +61,9 @@ import { copyableLogs, addLog } from "@/services/logger/logger";
 import { loadLogs, type AppLog } from "@/services/logger/logStorage";
 import { searchLectures } from "@/services/search/searchLectures";
 import { buildCourses, buildKeyTerms, buildReviewQueue, buildTags } from "@/services/search/studyCollections";
-import { saveAudio } from "@/services/recording/recordingStorage";
+import { loadLlmSettings, saveLlmSettings, defaultLlmSettings, providerDefaults } from "@/lib/llm/llmSettings";
+import type { LlmSettings, LlmProvider } from "@/lib/llm/llmSettings";
+import { saveAudio, deleteAudio } from "@/services/recording/recordingStorage";
 import { useRecordingController } from "@/services/recording/useRecordingController";
 import type { RecordingResult } from "@/services/recording/recordingService";
 import { formatDurationMs } from "@/lib/formatTime";
@@ -84,8 +86,11 @@ export default function Home() {
   const [notes, setNotes] = useState<Record<string, LectureNote>>({});
   const [markdownByLecture, setMarkdownByLecture] = useState<Record<string, string>>({});
   const [obsidianSettings, setObsidianSettings] = useState<ObsidianSettings>(defaultObsidianSettings);
+  const [llmSettings, setLlmSettings] = useState<LlmSettings>(loadLlmSettings);
   const [generationStep, setGenerationStep] = useState<SummaryGenerationStep>("idle");
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [transcribingLectureId, setTranscribingLectureId] = useState<string | null>(null);
+  const [transcriptionProgress, setTranscriptionProgress] = useState(0);
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [jumpTimestamp, setJumpTimestamp] = useState<number | undefined>();
@@ -187,6 +192,8 @@ export default function Home() {
   };
 
   const handleDeleteLecture = (lectureId: string) => {
+    const lecture = lectures.find((l) => l.id === lectureId);
+    if (lecture?.audioKey) deleteAudio(lecture.audioKey).catch(() => undefined);
     setLectures((current) => {
       const updated = deleteLecture(current, lectureId);
       if (selectedLectureId === lectureId) {
@@ -206,6 +213,8 @@ export default function Home() {
 
   const triggerTranscription = useCallback(async (lectureId: string, durationSec: number) => {
     try {
+      setTranscribingLectureId(lectureId);
+      setTranscriptionProgress(0);
       setLectures((current) => updateLecture(current, lectureId, { transcriptionStatus: "transcribing" }));
       const res = await fetch("/api/transcribe", {
         method: "POST",
@@ -222,8 +231,19 @@ export default function Home() {
       setLectures((current) => updateLecture(current, lectureId, { transcriptionStatus: "failed" }));
       addLog({ level: "error", area: "transcription", message: error instanceof Error ? error.message : "文字起こし処理に失敗しました。" });
       setLogs(loadLogs());
+    } finally {
+      setTranscribingLectureId(null);
+      setTranscriptionProgress(0);
     }
   }, []);
+
+  useEffect(() => {
+    if (!transcribingLectureId) return;
+    const interval = setInterval(() => {
+      setTranscriptionProgress((prev) => Math.min(prev + Math.random() * 8 + 2, 95));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [transcribingLectureId]);
 
   const handleCreateLectureFromRecording = useCallback(async (title: string, course: string, result: RecordingResult, audioMode: AudioMode) => {
     const now = new Date().toISOString();
@@ -273,17 +293,8 @@ export default function Home() {
       if (transcript.length === 0) throw new Error("文字起こしがまだありません。先に録音または音声取り込みを完了してください。");
 
       setGenerationStep("chunking_transcript");
-      await wait(160);
-      setGenerationStep("generating_summary");
-      await wait(220);
-      setGenerationStep("extracting_key_points");
-      await wait(180);
-      setGenerationStep("building_timeline");
-      await wait(180);
-      setGenerationStep("generating_quiz");
-      await wait(180);
 
-      const note = await generateLectureSummary(lecture, transcript, markers);
+      const note = await generateLectureSummary(lecture, transcript, markers, { provider: llmSettings.provider !== "mock" ? llmSettings.provider : "mock", llmSettings });
       setGenerationStep("generating_markdown");
       const markdown = buildLectureMarkdown(lecture, note, transcript, markers, obsidianSettings);
 
@@ -392,26 +403,26 @@ export default function Home() {
   return (
     <AppShell>
       <div className="relative flex min-h-full flex-1 flex-col overflow-hidden">
-        <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-28 pt-9">
+        <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-24 pt-9">
           {screen === "home" ? <HomeScreen lectures={lectures} audioMode={audioMode} onRecord={() => setScreen("recording")} onOpenDetail={(lectureId) => openDetail(lectureId, "overview")} onCreateLecture={handleCreateLecture} onNavigate={setScreen} /> : null}
-          {screen === "recording" ? <RecordingScreen lecture={selectedLecture} audioMode={audioMode} onImport={() => setScreen("home")} onRecordingComplete={handleCreateLectureFromRecording} /> : null}
-          {screen === "detail" ? selectedLecture ? <LectureDetailScreen lecture={selectedLecture} note={notes[selectedLecture.id]} markdown={markdownByLecture[selectedLecture.id]} obsidianSettings={obsidianSettings} transcript={transcriptByLecture[selectedLecture.id] ?? []} markers={markersByLecture[selectedLecture.id] ?? []} generationStep={generationStep} generationError={generationError} jumpTimestamp={jumpTimestamp} onCourseOpen={(course) => { setSelectedCourse(course); setScreen("courseDetail"); }} onOpenChat={() => setScreen("lectureChat")} onGenerateNote={handleGenerateNote} onTabChange={setDetailTab} activeTab={detailTab} onDeleteLecture={handleDeleteLecture} onUpdateLecture={handleUpdateLecture} /> : <NoLectureSelected onRecord={() => setScreen("recording")} /> : null}
-          {screen === "sync" ? <SyncScreen /> : null}
-          {screen === "search" ? <SearchScreen index={searchIndex} courses={courses} tags={Object.values(tagsByLecture).flat()} onOpenResult={openSearchResult} /> : null}
-          {screen === "courses" ? <CoursesScreen courses={courses} onOpenCourse={(course) => { setSelectedCourse(course.name); setScreen("courseDetail"); }} /> : null}
-          {screen === "courseDetail" ? <CourseDetailScreen courseName={selectedCourse ?? courses[0]?.name ?? ""} lectures={lectures} courses={courses} notes={notes} markersByLecture={markersByLecture} onOpenLecture={(lectureId) => openDetail(lectureId)} /> : null}
-          {screen === "reviewQueue" ? <ReviewQueueScreen items={reviewQueue} onOpenItem={(item) => { setSelectedLectureId(item.lectureId); setJumpTimestamp(item.timestamp); setDetailTab(item.timestamp ? "transcript" : "overview"); setScreen("detail"); }} /> : null}
-          {screen === "tags" ? <TagsScreen tagsByLecture={tagsByLecture} selectedTag={selectedTag} lectures={lectures} onSelectTag={setSelectedTag} onOpenLecture={(lectureId) => openDetail(lectureId)} /> : null}
-          {screen === "keyTerms" ? <KeyTermsScreen terms={keyTerms} onOpenTerm={(term) => { setSelectedLectureId(term.lectureIds[0]); setJumpTimestamp(term.timestamps[0]?.timestamp); setDetailTab("transcript"); setScreen("detail"); }} /> : null}
-          {screen === "lectureChat" ? selectedLecture ? <LectureChatScreen lecture={selectedLecture} messages={lectureChats[selectedLecture.id] ?? []} onAsk={handleLectureQuestion} onReference={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} /> : <NoLectureSelected onRecord={() => setScreen("recording")} /> : null}
-          {screen === "globalChat" ? <GlobalChatScreen messages={globalChat} onAsk={handleGlobalQuestion} onReference={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} /> : null}
-          {screen === "studyHome" ? <StudyHomeScreen cards={studyCards} quizzes={quizQuestions} queue={reviewQueue} weakPoints={weakPoints} lectures={lectures} onGenerate={generateStudyContent} onNavigate={setScreen} /> : null}
-          {screen === "flashcards" ? <FlashcardsScreen cards={studyCards} activeIndex={activeCardIndex} showBack={showCardBack} onFlip={() => setShowCardBack((value) => !value)} onStatus={updateCardStatus} onGenerate={generateStudyContent} onOpenLecture={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} /> : null}
-          {screen === "quiz" ? <QuizScreen questions={quizQuestions} activeIndex={activeQuizIndex} selectedAnswer={quizAnswer} onAnswer={answerQuiz} onNext={() => { setQuizAnswer(null); setActiveQuizIndex((index) => Math.min(index + 1, Math.max(quizQuestions.length - 1, 0))); }} onGenerate={generateStudyContent} /> : null}
-          {screen === "examMode" ? <ExamModeScreen cards={studyCards} questions={quizQuestions} weakPoints={weakPoints} queue={reviewQueue} courses={courses} onOpenLecture={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} /> : null}
-          {screen === "weakPoints" ? <WeakPointsScreen weakPoints={weakPoints} onOpenLecture={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} onAsk={(lectureId) => { setSelectedLectureId(lectureId); setScreen("lectureChat"); }} /> : null}
-          {screen === "reminders" ? <ReminderSettingsScreen settings={reminderSettings} courses={courses} onChange={saveReminder} /> : null}
-          {screen === "settings" ? <SettingsScreen audioMode={audioMode} obsidianSettings={obsidianSettings} jobs={jobs} logs={logs} lectures={lectures} onAudioModeChange={setAudioMode} onObsidianSettingsChange={setObsidianSettings} onAddJob={addDiagnosticJob} onCancelJob={cancelDiagnosticJob} onRefreshDiagnostics={() => { setJobs(loadJobs()); setLogs(loadLogs()); }} /> : null}
+          {screen === "recording" ? <RecordingScreen lecture={selectedLecture} audioMode={audioMode} onImport={() => setScreen("home")} onRecordingComplete={handleCreateLectureFromRecording} onBack={() => setScreen("home")} /> : null}
+          {screen === "detail" ? selectedLecture ? <LectureDetailScreen lecture={selectedLecture} note={notes[selectedLecture.id]} markdown={markdownByLecture[selectedLecture.id]} obsidianSettings={obsidianSettings} transcript={transcriptByLecture[selectedLecture.id] ?? []} markers={markersByLecture[selectedLecture.id] ?? []} generationStep={generationStep} generationError={generationError} jumpTimestamp={jumpTimestamp} onCourseOpen={(course) => { setSelectedCourse(course); setScreen("courseDetail"); }} onOpenChat={() => setScreen("lectureChat")} onGenerateNote={handleGenerateNote} onTabChange={setDetailTab} activeTab={detailTab} onDeleteLecture={handleDeleteLecture} onUpdateLecture={handleUpdateLecture} onBack={() => setScreen("home")} transcriptionProgress={transcribingLectureId === selectedLecture.id ? transcriptionProgress : null} /> : <NoLectureSelected onRecord={() => setScreen("recording")} /> : null}
+          {screen === "sync" ? <SyncScreen onBack={() => setScreen("home")} /> : null}
+          {screen === "search" ? <SearchScreen index={searchIndex} courses={courses} tags={Object.values(tagsByLecture).flat()} onOpenResult={openSearchResult} onBack={() => setScreen("home")} /> : null}
+          {screen === "courses" ? <CoursesScreen courses={courses} onOpenCourse={(course) => { setSelectedCourse(course.name); setScreen("courseDetail"); }} onBack={() => setScreen("home")} /> : null}
+          {screen === "courseDetail" ? <CourseDetailScreen courseName={selectedCourse ?? courses[0]?.name ?? ""} lectures={lectures} courses={courses} notes={notes} markersByLecture={markersByLecture} onOpenLecture={(lectureId) => openDetail(lectureId)} onBack={() => setScreen("courses")} /> : null}
+          {screen === "reviewQueue" ? <ReviewQueueScreen items={reviewQueue} onOpenItem={(item) => { setSelectedLectureId(item.lectureId); setJumpTimestamp(item.timestamp); setDetailTab(item.timestamp ? "transcript" : "overview"); setScreen("detail"); }} onBack={() => setScreen("home")} /> : null}
+          {screen === "tags" ? <TagsScreen tagsByLecture={tagsByLecture} selectedTag={selectedTag} lectures={lectures} onSelectTag={setSelectedTag} onOpenLecture={(lectureId) => openDetail(lectureId)} onBack={() => setScreen("home")} /> : null}
+          {screen === "keyTerms" ? <KeyTermsScreen terms={keyTerms} onOpenTerm={(term) => { setSelectedLectureId(term.lectureIds[0]); setJumpTimestamp(term.timestamps[0]?.timestamp); setDetailTab("transcript"); setScreen("detail"); }} onBack={() => setScreen("home")} /> : null}
+          {screen === "lectureChat" ? selectedLecture ? <LectureChatScreen lecture={selectedLecture} messages={lectureChats[selectedLecture.id] ?? []} onAsk={handleLectureQuestion} onReference={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} onBack={() => setScreen("detail")} /> : <NoLectureSelected onRecord={() => setScreen("recording")} /> : null}
+          {screen === "globalChat" ? <GlobalChatScreen messages={globalChat} onAsk={handleGlobalQuestion} onReference={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} onBack={() => setScreen("home")} /> : null}
+          {screen === "studyHome" ? <StudyHomeScreen cards={studyCards} quizzes={quizQuestions} queue={reviewQueue} weakPoints={weakPoints} lectures={lectures} onGenerate={generateStudyContent} onNavigate={setScreen} onBack={() => setScreen("home")} /> : null}
+          {screen === "flashcards" ? <FlashcardsScreen cards={studyCards} activeIndex={activeCardIndex} showBack={showCardBack} onFlip={() => setShowCardBack((value) => !value)} onStatus={updateCardStatus} onGenerate={generateStudyContent} onOpenLecture={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} onBack={() => setScreen("studyHome")} /> : null}
+          {screen === "quiz" ? <QuizScreen questions={quizQuestions} activeIndex={activeQuizIndex} selectedAnswer={quizAnswer} onAnswer={answerQuiz} onNext={() => { setQuizAnswer(null); setActiveQuizIndex((index) => Math.min(index + 1, Math.max(quizQuestions.length - 1, 0))); }} onGenerate={generateStudyContent} onBack={() => setScreen("studyHome")} /> : null}
+          {screen === "examMode" ? <ExamModeScreen cards={studyCards} questions={quizQuestions} weakPoints={weakPoints} queue={reviewQueue} courses={courses} onOpenLecture={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} onBack={() => setScreen("studyHome")} /> : null}
+          {screen === "weakPoints" ? <WeakPointsScreen weakPoints={weakPoints} onOpenLecture={(lectureId, timestamp) => { setSelectedLectureId(lectureId); setJumpTimestamp(timestamp); setDetailTab("transcript"); setScreen("detail"); }} onAsk={(lectureId) => { setSelectedLectureId(lectureId); setScreen("lectureChat"); }} onBack={() => setScreen("studyHome")} /> : null}
+          {screen === "reminders" ? <ReminderSettingsScreen settings={reminderSettings} courses={courses} onChange={saveReminder} onBack={() => setScreen("settings")} /> : null}
+          {screen === "settings" ? <SettingsScreen audioMode={audioMode} obsidianSettings={obsidianSettings} llmSettings={llmSettings} jobs={jobs} logs={logs} lectures={lectures} onAudioModeChange={setAudioMode} onObsidianSettingsChange={setObsidianSettings} onLlmSettingsChange={(settings: LlmSettings) => { saveLlmSettings(settings); setLlmSettings(settings); }} onAddJob={addDiagnosticJob} onCancelJob={cancelDiagnosticJob} onRefreshDiagnostics={() => { setJobs(loadJobs()); setLogs(loadLogs()); }} onBack={() => setScreen("home")} /> : null}
         </div>
         <FloatingTabBar active={screen} onChange={setScreen} />
       </div>
@@ -419,11 +430,16 @@ export default function Home() {
   );
 }
 
-function ScreenHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
+function ScreenHeader({ eyebrow, title, description, onBack }: { eyebrow: string; title: string; description?: string; onBack?: () => void }) {
   return (
     <header className="mb-5">
-      <p className="text-xs font-black uppercase tracking-[0.22em] text-sky-700/80">{eyebrow}</p>
-      <h1 className="mt-2 text-[32px] font-bold leading-tight tracking-tight text-slate-950">{title}</h1>
+      <div className="flex items-center gap-3">
+        {onBack ? <button onClick={onBack} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/65 text-slate-600 shadow-sm backdrop-blur-2xl transition-all active:scale-95 hover:bg-white/80" aria-label="戻る"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg></button> : null}
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-sky-700/80">{eyebrow}</p>
+          <h1 className="mt-2 text-[32px] font-bold leading-tight tracking-tight text-slate-950">{title}</h1>
+        </div>
+      </div>
       {description ? <p className="mt-2 text-[15px] leading-7 text-slate-600">{description}</p> : null}
     </header>
   );
@@ -468,7 +484,7 @@ function HomeScreen({
       <GlassCard className="relative overflow-hidden p-5">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-sky-300/35 blur-3xl" />
         <div className="relative flex items-center gap-4">
-          <button onClick={onRecord} className="grid h-24 w-24 shrink-0 place-items-center rounded-full bg-gradient-to-br from-rose-400 via-red-500 to-orange-400 text-white shadow-[0_22px_60px_rgba(244,63,94,0.38)] ring-8 ring-white/45 transition-all active:scale-95">
+          <button onClick={onRecord} className="grid h-24 w-24 shrink-0 place-items-center rounded-full bg-gradient-to-br from-rose-400 via-red-500 to-orange-400 text-white shadow-[0_22px_60px_rgba(244,63,94,0.38)] ring-8 ring-white/45 transition-all active:scale-95" aria-label="録音開始">
             <Mic className="h-9 w-9" />
           </button>
           <div className="min-w-0">
@@ -535,7 +551,7 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RecordingScreen({ lecture, audioMode, onImport, onRecordingComplete }: { lecture?: Lecture; audioMode: AudioMode; onImport: () => void; onRecordingComplete: (title: string, course: string, result: RecordingResult, audioMode: AudioMode) => Promise<void> }) {
+function RecordingScreen({ lecture, audioMode, onImport, onRecordingComplete, onBack }: { lecture?: Lecture; audioMode: AudioMode; onImport: () => void; onRecordingComplete: (title: string, course: string, result: RecordingResult, audioMode: AudioMode) => Promise<void>; onBack: () => void }) {
   const ctrl = useRecordingController();
   const [title, setTitle] = useState(lecture?.title ?? "");
   const [course, setCourse] = useState(lecture?.course ?? "");
@@ -565,7 +581,7 @@ function RecordingScreen({ lecture, audioMode, onImport, onRecordingComplete }: 
   if (!ctrl.supported) {
     return (
       <div className="space-y-5">
-        <ScreenHeader eyebrow="Recording" title="録音" description="Webブラウザからの録音には対応していません。" />
+        <ScreenHeader eyebrow="Recording" title="録音" description="Webブラウザからの録音には対応していません。" onBack={onBack} />
         <ErrorCard title="このブラウザは録音に対応していません" message="Chrome, Edge, Firefox のいずれかをお使いください。Safari は一部制限があります。" />
         <GlassButton onClick={onImport} variant="primary" className="w-full"><FileAudio2 className="h-4 w-4" />音声ファイルを取り込む</GlassButton>
       </div>
@@ -574,7 +590,7 @@ function RecordingScreen({ lecture, audioMode, onImport, onRecordingComplete }: 
 
   return (
     <div className="space-y-5">
-      <ScreenHeader eyebrow="Recording" title={isRecording ? "録音中" : isPaused ? "一時停止中" : isFinalizing ? "保存中..." : "最初の講義を録音"} description="講義に集中できるよう、録音中は余計な表示を減らします。" />
+      <ScreenHeader eyebrow="Recording" title={isRecording ? "録音中" : isPaused ? "一時停止中" : isFinalizing ? "保存中..." : "最初の講義を録音"} description="講義に集中できるよう、録音中は余計な表示を減らします。" onBack={onBack} />
 
       {hasError ? <ErrorCard title="録音でエラーが発生しました" message={ctrl.error ?? "不明なエラーです。"} actionLabel="もう一度試す" onRetry={() => ctrl.start(audioMode)} /> : null}
 
@@ -661,6 +677,8 @@ function LectureDetailScreen({
   onGenerateNote,
   onDeleteLecture,
   onUpdateLecture,
+  onBack,
+  transcriptionProgress,
 }: {
   lecture: Lecture;
   note?: LectureNote;
@@ -678,6 +696,8 @@ function LectureDetailScreen({
   onGenerateNote: (lecture: Lecture) => void;
   onDeleteLecture: (lectureId: string) => void;
   onUpdateLecture: (lectureId: string, patch: Partial<Lecture>) => void;
+  onBack: () => void;
+  transcriptionProgress: number | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(lecture.title);
@@ -719,14 +739,14 @@ function LectureDetailScreen({
           <div className="flex shrink-0 gap-2">
             {!editing && (
               <>
-                <button onClick={startEditing} className="grid h-11 w-11 place-items-center rounded-2xl bg-white/65 text-slate-600 shadow-md backdrop-blur-2xl transition-all active:scale-95 hover:bg-white/80"><Edit3 className="h-5 w-5" /></button>
+                <button onClick={startEditing} className="grid h-11 w-11 place-items-center rounded-2xl bg-white/65 text-slate-600 shadow-md backdrop-blur-2xl transition-all active:scale-95 hover:bg-white/80" aria-label="編集"><Edit3 className="h-5 w-5" /></button>
                 {showDeleteConfirm ? (
                   <div className="flex gap-2">
                     <button onClick={() => { onDeleteLecture(lecture.id); setShowDeleteConfirm(false); }} className="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-bold text-white shadow-md transition-all active:scale-95">削除</button>
                     <button onClick={() => setShowDeleteConfirm(false)} className="rounded-2xl bg-white/65 px-4 py-2 text-sm font-bold text-slate-600 shadow-md backdrop-blur-2xl transition-all active:scale-95">取消</button>
                   </div>
                 ) : (
-                  <button onClick={() => setShowDeleteConfirm(true)} className="grid h-11 w-11 place-items-center rounded-2xl bg-white/65 text-rose-500 shadow-md backdrop-blur-2xl transition-all active:scale-95 hover:bg-white/80"><Trash2 className="h-5 w-5" /></button>
+                  <button onClick={() => setShowDeleteConfirm(true)} className="grid h-11 w-11 place-items-center rounded-2xl bg-white/65 text-rose-500 shadow-md backdrop-blur-2xl transition-all active:scale-95 hover:bg-white/80" aria-label="削除"><Trash2 className="h-5 w-5" /></button>
                 )}
               </>
             )}
@@ -746,6 +766,17 @@ function LectureDetailScreen({
             <StatusPill status={lecture.obsidianExportStatus} />
             <StatusPill status={lecture.syncStatus} />
           </div>
+          {transcriptionProgress !== null && lecture.transcriptionStatus === "transcribing" ? (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                <span>文字起こし中...</span>
+                <span>{Math.round(transcriptionProgress)}%</span>
+              </div>
+              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full rounded-full bg-sky-400 transition-all duration-1000" style={{ width: `${transcriptionProgress}%` }} />
+              </div>
+            </div>
+          ) : null}
           {lecture.note ? <p className="mt-3 rounded-2xl bg-white/55 px-3 py-3 text-sm leading-6 text-slate-600">{lecture.note}</p> : null}
         </GlassCard>
       </header>
@@ -960,7 +991,7 @@ function ReviewTab({ note, generationStep, generationError, onGenerateNote }: { 
   );
 }
 
-function SyncScreen() {
+function SyncScreen({ onBack }: { onBack: () => void }) {
   const [serverInfo, setServerInfo] = useState<{ baseUrl: string; deviceName: string; pairing: unknown } | null>(null);
   const [receivedLectures, setReceivedLectures] = useState<Lecture[]>([]);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -998,7 +1029,7 @@ function SyncScreen() {
 
   return (
     <div className="space-y-5">
-      <ScreenHeader eyebrow="Sync" title="Windowsと同期" description="スマホで録音、Windowsで高精度化。ローカルWi-Fiだけで安全に講義を移動します。" />
+      <ScreenHeader eyebrow="Sync" title="Windowsと同期" description="スマホで録音、Windowsで高精度化。ローカルWi-Fiだけで安全に講義を移動します。" onBack={onBack} />
       <GlassCard className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -1055,20 +1086,37 @@ function SyncScreen() {
   );
 }
 
-function SearchScreen({ index, courses, tags, onOpenResult }: { index: ReturnType<typeof buildSearchIndex>; courses: Course[]; tags: LectureTag[]; onOpenResult: (result: SearchResult) => void }) {
+function SearchScreen({ index, courses, tags, onOpenResult, onBack }: { index: ReturnType<typeof buildSearchIndex>; courses: Course[]; tags: LectureTag[]; onOpenResult: (result: SearchResult) => void; onBack: () => void }) {
   const [query, setQuery] = useState("");
   const [course, setCourse] = useState<string | undefined>();
   const [tag, setTag] = useState<string | undefined>();
+  const [history, setHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("classnote-ai:search-history") ?? "[]") as string[]; } catch { return []; }
+  });
   const results = searchLectures(index, query, { course, tag, period: "all" });
   const uniqueTags = [...new Set(tags.map((item) => item.name))];
 
+  const saveToHistory = (q: string) => {
+    if (!q.trim()) return;
+    setHistory((prev) => {
+      const next = [q, ...prev.filter((h) => h !== q)].slice(0, 10);
+      try { localStorage.setItem("classnote-ai:search-history", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const handleOpenResult = (result: SearchResult) => {
+    saveToHistory(query);
+    onOpenResult(result);
+  };
+
   return (
     <div className="space-y-5">
-      <ScreenHeader eyebrow="Search" title="講義を探す" description="タイトル、科目、文字起こし、要約、マーカーをまとめて検索できます。" />
-      <div className="rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm"><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-[15px] font-semibold outline-none placeholder:text-slate-400" placeholder="講義を検索..." /></div>
-      <GlassCard className="p-4"><p className="text-xs font-bold text-slate-500">最近の検索</p><div className="mt-2 flex flex-wrap gap-2">{["試験対策", "わからない", "重要ポイント", "課題"].map((item) => <button key={item} onClick={() => setQuery(item)} className="rounded-full bg-white/65 px-3 py-2 text-xs font-bold text-slate-700">{item}</button>)}</div></GlassCard>
+      <ScreenHeader eyebrow="Search" title="講義を探す" description="タイトル、科目、文字起こし、要約、マーカーをまとめて検索できます。" onBack={onBack} />
+      <div className="rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm"><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveToHistory(query); }} className="w-full bg-transparent text-[15px] font-semibold outline-none placeholder:text-slate-400" placeholder="講義を検索..." /></div>
+      {history.length > 0 ? <GlassCard className="p-4"><p className="text-xs font-bold text-slate-500">最近の検索</p><div className="mt-2 flex flex-wrap gap-2">{history.map((item) => <button key={item} onClick={() => setQuery(item)} className="rounded-full bg-white/65 px-3 py-2 text-xs font-bold text-slate-700">{item}</button>)}</div></GlassCard> : null}
       <div className="space-y-2"><FilterRow label="科目" values={courses.map((item) => item.name)} active={course} onSelect={setCourse} /><FilterRow label="タグ" values={uniqueTags} active={tag} onSelect={setTag} /></div>
-      <GlassCard solid className="p-4"><h3 className="text-lg font-bold text-slate-900">検索結果</h3><div className="mt-3 space-y-2">{results.length === 0 ? <EmptyState text="検索結果がありません。別のキーワードを試してください。" /> : results.map((result) => <SearchResultCard key={`${result.lectureId}-${result.source}-${result.timestamp}-${result.matchedText}`} result={result} query={query} onClick={() => onOpenResult(result)} />)}</div></GlassCard>
+      <GlassCard solid className="p-4"><h3 className="text-lg font-bold text-slate-900">検索結果</h3><div className="mt-3 space-y-2">{results.length === 0 ? <EmptyState text="検索結果がありません。別のキーワードを試してください。" /> : results.map((result) => <SearchResultCard key={`${result.lectureId}-${result.source}-${result.timestamp}-${result.matchedText}`} result={result} query={query} onClick={() => handleOpenResult(result)} />)}</div></GlassCard>
     </div>
   );
 }
@@ -1081,44 +1129,44 @@ function SearchResultCard({ result, query, onClick }: { result: SearchResult; qu
   return <button onClick={onClick} className="w-full rounded-[24px] bg-slate-50 p-4 text-left transition-all active:scale-[0.99]"><div className="flex items-center justify-between gap-3"><h4 className="font-bold text-slate-950">{result.lectureTitle}</h4>{result.timestamp !== undefined ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-xs font-bold text-white tabular-nums">{formatTimestamp(result.timestamp)}</span> : null}</div><p className="mt-1 text-xs font-semibold text-slate-500">{result.course} ・ {result.source}</p><p className="mt-2 text-sm leading-6 text-slate-700">{highlightText(result.matchedText, query)}</p><div className="mt-2 flex flex-wrap gap-1.5">{result.tags.slice(0, 3).map((tag) => <StatusPill key={tag} tone={tag === "わからない" ? "rose" : tag === "試験に出そう" ? "violet" : "blue"}>{tag}</StatusPill>)}</div></button>;
 }
 
-function CoursesScreen({ courses, onOpenCourse }: { courses: Course[]; onOpenCourse: (course: Course) => void }) {
-  return <div className="space-y-5"><ScreenHeader eyebrow="Courses" title="科目別に整理" description="講義数、未復習、わからない場所、試験ポイントを科目ごとに確認できます。" />{courses.length === 0 ? <EmptyState text="科目がまだありません。講義を録音すると自動で整理されます。" /> : courses.map((course) => <button key={course.id} onClick={() => onOpenCourse(course)} className="w-full text-left"><GlassCard className="p-5"><div className="flex items-start justify-between"><div><h3 className="text-xl font-bold text-slate-950">{course.name}</h3><p className="mt-1 text-sm text-slate-500">最終録音: {course.lastRecordedAt ? formatJapaneseDate(course.lastRecordedAt) : "なし"}</p></div><StatusPill tone="blue">{course.lectureCount}講義</StatusPill></div><div className="mt-4 grid grid-cols-3 gap-2"><MiniStat label="未復習" value={`${course.unreviewedCount}`} /><MiniStat label="わからない" value={`${course.confusingMarkerCount}`} /><MiniStat label="試験" value={`${course.examLikelyPointCount}`} /></div></GlassCard></button>)}</div>;
+function CoursesScreen({ courses, onOpenCourse, onBack }: { courses: Course[]; onOpenCourse: (course: Course) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Courses" title="科目別に整理" description="講義数、未復習、わからない場所、試験ポイントを科目ごとに確認できます。" onBack={onBack} />{courses.length === 0 ? <EmptyState text="科目がまだありません。講義を録音すると自動で整理されます。" /> : courses.map((course) => <button key={course.id} onClick={() => onOpenCourse(course)} className="w-full text-left"><GlassCard className="p-5"><div className="flex items-start justify-between"><div><h3 className="text-xl font-bold text-slate-950">{course.name}</h3><p className="mt-1 text-sm text-slate-500">最終録音: {course.lastRecordedAt ? formatJapaneseDate(course.lastRecordedAt) : "なし"}</p></div><StatusPill tone="blue">{course.lectureCount}講義</StatusPill></div><div className="mt-4 grid grid-cols-3 gap-2"><MiniStat label="未復習" value={`${course.unreviewedCount}`} /><MiniStat label="わからない" value={`${course.confusingMarkerCount}`} /><MiniStat label="試験" value={`${course.examLikelyPointCount}`} /></div></GlassCard></button>)}</div>;
 }
 
-function CourseDetailScreen({ courseName, lectures, courses, notes, markersByLecture, onOpenLecture }: { courseName: string; lectures: Lecture[]; courses: Course[]; notes: Record<string, LectureNote>; markersByLecture: Record<string, LectureMarker[]>; onOpenLecture: (lectureId: string) => void }) {
+function CourseDetailScreen({ courseName, lectures, courses, notes, markersByLecture, onOpenLecture, onBack }: { courseName: string; lectures: Lecture[]; courses: Course[]; notes: Record<string, LectureNote>; markersByLecture: Record<string, LectureMarker[]>; onOpenLecture: (lectureId: string) => void; onBack: () => void }) {
   const [sort, setSort] = useState<"date" | "unreviewed" | "important">("date");
   const course = courses.find((item) => item.name === courseName);
   const courseLectures = lectures.filter((lecture) => lecture.course === courseName).sort((a, b) => sort === "date" ? b.recordedAt.localeCompare(a.recordedAt) : sort === "unreviewed" ? Number(!notes[b.id]) - Number(!notes[a.id]) : (markersByLecture[b.id]?.length ?? 0) - (markersByLecture[a.id]?.length ?? 0));
-  return <div className="space-y-5"><ScreenHeader eyebrow="Course" title={courseName || "科目"} description="復習進捗、重要語句、わからない場所を科目単位で確認します。" /><GlassCard className="p-5"><div className="grid grid-cols-3 gap-2"><MiniStat label="講義" value={`${course?.lectureCount ?? 0}`} /><MiniStat label="未復習" value={`${course?.unreviewedCount ?? 0}`} /><MiniStat label="わからない" value={`${course?.confusingMarkerCount ?? 0}`} /></div></GlassCard><FilterRow label="並び替え" values={["date", "unreviewed", "important"]} active={sort} onSelect={(value) => setSort((value as typeof sort) ?? "date")} /><GlassCard solid className="p-4"><h3 className="text-lg font-bold">講義一覧</h3><div className="mt-3 space-y-2">{courseLectures.map((lecture) => <LectureCard key={lecture.id} lecture={lecture} onClick={() => onOpenLecture(lecture.id)} />)}</div></GlassCard><GlassCard className="p-5"><h3 className="text-lg font-bold">試験に出そうなポイント</h3><div className="mt-3 space-y-2">{courseLectures.flatMap((lecture) => notes[lecture.id]?.examLikelyPoints ?? []).slice(0, 6).map((point) => <CheckLine key={point}>{point}</CheckLine>)}</div></GlassCard></div>;
+  return <div className="space-y-5"><ScreenHeader eyebrow="Course" title={courseName || "科目"} description="復習進捗、重要語句、わからない場所を科目単位で確認します。" onBack={onBack} /><GlassCard className="p-5"><div className="grid grid-cols-3 gap-2"><MiniStat label="講義" value={`${course?.lectureCount ?? 0}`} /><MiniStat label="未復習" value={`${course?.unreviewedCount ?? 0}`} /><MiniStat label="わからない" value={`${course?.confusingMarkerCount ?? 0}`} /></div></GlassCard><FilterRow label="並び替え" values={["date", "unreviewed", "important"]} active={sort} onSelect={(value) => setSort((value as typeof sort) ?? "date")} /><GlassCard solid className="p-4"><h3 className="text-lg font-bold">講義一覧</h3><div className="mt-3 space-y-2">{courseLectures.map((lecture) => <LectureCard key={lecture.id} lecture={lecture} onClick={() => onOpenLecture(lecture.id)} />)}</div></GlassCard><GlassCard className="p-5"><h3 className="text-lg font-bold">試験に出そうなポイント</h3><div className="mt-3 space-y-2">{courseLectures.flatMap((lecture) => notes[lecture.id]?.examLikelyPoints ?? []).slice(0, 6).map((point) => <CheckLine key={point}>{point}</CheckLine>)}</div></GlassCard></div>;
 }
 
-function ReviewQueueScreen({ items, onOpenItem }: { items: ReviewQueueItem[]; onOpenItem: (item: ReviewQueueItem) => void }) {
-  return <div className="space-y-5"><ScreenHeader eyebrow="Review" title="今日の復習" description="わからないまま残っている箇所と、試験前に見返すべき講義を集めました。" />{items.length === 0 ? <EmptyState text="まだ復習が必要な講義はありません。今日の講義を録音すると自動で表示されます。" /> : items.map((item) => <button key={item.id} onClick={() => onOpenItem(item)} className="w-full text-left"><GlassCard solid className="p-4"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-950">{item.title}</h3><StatusPill tone={item.priority === "high" ? "rose" : item.priority === "medium" ? "amber" : "slate"}>{item.priority}</StatusPill></div><p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>{item.timestamp !== undefined ? <p className="mt-2 text-xs font-bold text-sky-700">{formatTimestamp(item.timestamp)} から復習する</p> : null}</GlassCard></button>)}</div>;
+function ReviewQueueScreen({ items, onOpenItem, onBack }: { items: ReviewQueueItem[]; onOpenItem: (item: ReviewQueueItem) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Review" title="今日の復習" description="わからないまま残っている箇所と、試験前に見返すべき講義を集めました。" onBack={onBack} />{items.length === 0 ? <EmptyState text="まだ復習が必要な講義はありません。今日の講義を録音すると自動で表示されます。" /> : items.map((item) => <button key={item.id} onClick={() => onOpenItem(item)} className="w-full text-left"><GlassCard solid className="p-4"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-950">{item.title}</h3><StatusPill tone={item.priority === "high" ? "rose" : item.priority === "medium" ? "amber" : "slate"}>{item.priority}</StatusPill></div><p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>{item.timestamp !== undefined ? <p className="mt-2 text-xs font-bold text-sky-700">{formatTimestamp(item.timestamp)} から復習する</p> : null}</GlassCard></button>)}</div>;
 }
 
-function TagsScreen({ tagsByLecture, selectedTag, lectures, onSelectTag, onOpenLecture }: { tagsByLecture: Record<string, LectureTag[]>; selectedTag: string | null; lectures: Lecture[]; onSelectTag: (tag: string | null) => void; onOpenLecture: (lectureId: string) => void }) {
+function TagsScreen({ tagsByLecture, selectedTag, lectures, onSelectTag, onOpenLecture, onBack }: { tagsByLecture: Record<string, LectureTag[]>; selectedTag: string | null; lectures: Lecture[]; onSelectTag: (tag: string | null) => void; onOpenLecture: (lectureId: string) => void; onBack: () => void }) {
   const allTags = Object.values(tagsByLecture).flat();
   const names = [...new Set(allTags.map((tag) => tag.name))];
   const filtered = selectedTag ? lectures.filter((lecture) => tagsByLecture[lecture.id]?.some((tag) => tag.name === selectedTag)) : [];
-  return <div className="space-y-5"><ScreenHeader eyebrow="Tags" title="タグで整理" description="自動生成タグと手動タグを分けて、講義をすばやく絞り込みます。" /><GlassCard className="p-5"><div className="flex flex-wrap gap-2">{names.length === 0 ? <EmptyState text="タグがまだありません。" /> : names.map((name) => <button key={name} onClick={() => onSelectTag(selectedTag === name ? null : name)} className={`rounded-full px-4 py-2 text-sm font-bold ${selectedTag === name ? "bg-slate-950 text-white" : "bg-white/70 text-slate-700"}`}>#{name} <span className="text-xs opacity-70">{allTags.filter((tag) => tag.name === name).length}</span></button>)}</div></GlassCard>{selectedTag ? <GlassCard solid className="p-4"><h3 className="text-lg font-bold">#{selectedTag} の講義</h3><div className="mt-3 space-y-2">{filtered.map((lecture) => <LectureCard key={lecture.id} lecture={lecture} onClick={() => onOpenLecture(lecture.id)} />)}</div></GlassCard> : null}</div>;
+  return <div className="space-y-5"><ScreenHeader eyebrow="Tags" title="タグで整理" description="自動生成タグと手動タグを分けて、講義をすばやく絞り込みます。" onBack={onBack} /><GlassCard className="p-5"><div className="flex flex-wrap gap-2">{names.length === 0 ? <EmptyState text="タグがまだありません。" /> : names.map((name) => <button key={name} onClick={() => onSelectTag(selectedTag === name ? null : name)} className={`rounded-full px-4 py-2 text-sm font-bold ${selectedTag === name ? "bg-slate-950 text-white" : "bg-white/70 text-slate-700"}`}>#{name} <span className="text-xs opacity-70">{allTags.filter((tag) => tag.name === name).length}</span></button>)}</div></GlassCard>{selectedTag ? <GlassCard solid className="p-4"><h3 className="text-lg font-bold">#{selectedTag} の講義</h3><div className="mt-3 space-y-2">{filtered.map((lecture) => <LectureCard key={lecture.id} lecture={lecture} onClick={() => onOpenLecture(lecture.id)} />)}</div></GlassCard> : null}</div>;
 }
 
-function KeyTermsScreen({ terms, onOpenTerm }: { terms: KeyTerm[]; onOpenTerm: (term: KeyTerm) => void }) {
-  return <div className="space-y-5"><ScreenHeader eyebrow="Terms" title="重要語句" description="講義全体から抽出された用語を、科目・講義・タイムスタンプと一緒に確認します。" />{terms.length === 0 ? <EmptyState text="重要語句がまだ生成されていません。自動メモを生成するとここに表示されます。" /> : terms.map((term) => <button key={term.id} onClick={() => onOpenTerm(term)} className="w-full text-left"><GlassCard solid className="p-5"><div className="flex items-center justify-between"><h3 className="text-xl font-bold text-slate-950">{term.term}</h3><StatusPill tone="violet">Obsidian link</StatusPill></div><p className="mt-1 text-sm font-semibold text-slate-500">{term.course}</p><p className="mt-3 text-sm leading-6 text-slate-700">{term.description}</p><p className="mt-3 text-xs font-bold text-sky-700">出現: {term.lectureTitles.join(", ")}</p></GlassCard></button>)}</div>;
+function KeyTermsScreen({ terms, onOpenTerm, onBack }: { terms: KeyTerm[]; onOpenTerm: (term: KeyTerm) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Terms" title="重要語句" description="講義全体から抽出された用語を、科目・講義・タイムスタンプと一緒に確認します。" onBack={onBack} />{terms.length === 0 ? <EmptyState text="重要語句がまだ生成されていません。自動メモを生成するとここに表示されます。" /> : terms.map((term) => <button key={term.id} onClick={() => onOpenTerm(term)} className="w-full text-left"><GlassCard solid className="p-5"><div className="flex items-center justify-between"><h3 className="text-xl font-bold text-slate-950">{term.term}</h3><StatusPill tone="violet">Obsidian link</StatusPill></div><p className="mt-1 text-sm font-semibold text-slate-500">{term.course}</p><p className="mt-3 text-sm leading-6 text-slate-700">{term.description}</p><p className="mt-3 text-xs font-bold text-sky-700">出現: {term.lectureTitles.join(", ")}</p></GlassCard></button>)}</div>;
 }
 
 const lectureQuestionChips = ["この講義を簡単に要約して", "試験に出そうな部分は？", "わからない場所を解説して", "重要語句を教えて", "復習問題を作って", "マーカー箇所を解説して"];
 const globalQuestionChips = ["試験に出そうな講義を教えて", "未復習の重要ポイントをまとめて", "わからないマーカーが多い部分を教えて", "全講義から重要語句を抽出して"];
 
-function LectureChatScreen({ lecture, messages, onAsk, onReference }: { lecture: Lecture; messages: ChatMessage[]; onAsk: (question: string) => void; onReference: (lectureId: string, timestamp?: number) => void }) {
-  return <ChatScreenShell eyebrow="Lecture Chat" title={lecture.title} description={`${lecture.course} ・ 文字起こしとマーカーをもとに答えます`} messages={messages} chips={lectureQuestionChips} onAsk={onAsk} onReference={onReference} emptyText="この講義について質問できます。文字起こし・要約・マーカーをもとに、復習を手伝います。" />;
+function LectureChatScreen({ lecture, messages, onAsk, onReference, onBack }: { lecture: Lecture; messages: ChatMessage[]; onAsk: (question: string) => void; onReference: (lectureId: string, timestamp?: number) => void; onBack: () => void }) {
+  return <ChatScreenShell eyebrow="Lecture Chat" title={lecture.title} description={`${lecture.course} ・ 文字起こしとマーカーをもとに答えます`} messages={messages} chips={lectureQuestionChips} onAsk={onAsk} onReference={onReference} onBack={onBack} emptyText="この講義について質問できます。文字起こし・要約・マーカーをもとに、復習を手伝います。" />;
 }
 
-function GlobalChatScreen({ messages, onAsk, onReference }: { messages: ChatMessage[]; onAsk: (question: string) => void; onReference: (lectureId: string, timestamp?: number) => void }) {
-  return <ChatScreenShell eyebrow="Study Chat" title="全講義に質問" description="検索と講義データを使って、関連講義を探してから答えます。" messages={messages} chips={globalQuestionChips} onAsk={onAsk} onReference={onReference} emptyText="全講義を横断して質問できます。未復習、試験対策、わからない場所をまとめて確認できます。" />;
+function GlobalChatScreen({ messages, onAsk, onReference, onBack }: { messages: ChatMessage[]; onAsk: (question: string) => void; onReference: (lectureId: string, timestamp?: number) => void; onBack: () => void }) {
+  return <ChatScreenShell eyebrow="Study Chat" title="全講義に質問" description="検索と講義データを使って、関連講義を探してから答えます。" messages={messages} chips={globalQuestionChips} onAsk={onAsk} onReference={onReference} onBack={onBack} emptyText="全講義を横断して質問できます。未復習、試験対策、わからない場所をまとめて確認できます。" />;
 }
 
-function ChatScreenShell({ eyebrow, title, description, messages, chips, emptyText, onAsk, onReference }: { eyebrow: string; title: string; description: string; messages: ChatMessage[]; chips: string[]; emptyText: string; onAsk: (question: string) => void; onReference: (lectureId: string, timestamp?: number) => void }) {
+function ChatScreenShell({ eyebrow, title, description, messages, chips, emptyText, onAsk, onReference, onBack }: { eyebrow: string; title: string; description: string; messages: ChatMessage[]; chips: string[]; emptyText: string; onAsk: (question: string) => void; onReference: (lectureId: string, timestamp?: number) => void; onBack: () => void }) {
   const [draft, setDraft] = useState("");
   const submit = (question: string) => {
     const text = question.trim();
@@ -1129,7 +1177,7 @@ function ChatScreenShell({ eyebrow, title, description, messages, chips, emptyTe
 
   return (
     <div className="space-y-5">
-      <ScreenHeader eyebrow={eyebrow} title={title} description={description} />
+      <ScreenHeader eyebrow={eyebrow} title={title} description={description} onBack={onBack} />
       <GlassCard className="p-4"><p className="text-xs font-bold text-slate-500">おすすめ質問</p><div className="mt-3 flex flex-wrap gap-2">{chips.map((chip) => <button key={chip} onClick={() => submit(chip)} className="rounded-full bg-white/70 px-3 py-2 text-xs font-bold text-slate-700 shadow-inner">{chip}</button>)}</div></GlassCard>
       <GlassCard solid className="p-4"><div className="space-y-3">{messages.length === 0 ? <EmptyState text={emptyText} /> : messages.map((message) => <ChatBubble key={message.id} message={message} onReference={onReference} />)}</div></GlassCard>
       <div className="sticky bottom-24 rounded-[28px] border border-white/70 bg-white/72 p-2 shadow-[0_18px_60px_rgba(15,23,42,0.16)] backdrop-blur-3xl">
@@ -1144,38 +1192,38 @@ function ChatBubble({ message, onReference }: { message: ChatMessage; onReferenc
   return <div className={`rounded-[26px] p-4 ${isUser ? "ml-8 bg-slate-950 text-white" : "mr-6 bg-white shadow-inner"}`}><p className={`whitespace-pre-wrap text-sm leading-7 ${isUser ? "text-white" : "text-slate-700"}`}>{message.content}</p>{!isUser && message.references?.length ? <div className="mt-3 space-y-2"><p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">参照</p>{message.references.map((ref, index) => <button key={`${ref.lectureId}-${ref.timestamp}-${index}`} onClick={() => onReference(ref.lectureId, ref.timestamp)} className="w-full rounded-2xl bg-sky-50 px-3 py-2 text-left text-xs text-sky-900"><span className="font-black">{ref.timestamp !== undefined ? `${formatTimestamp(ref.timestamp)} ` : ""}{ref.lectureTitle}</span><br />{ref.text}</button>)}</div> : null}</div>;
 }
 
-function StudyHomeScreen({ cards, quizzes, queue, weakPoints, lectures, onGenerate, onNavigate }: { cards: StudyCard[]; quizzes: QuizQuestion[]; queue: ReviewQueueItem[]; weakPoints: WeakPoint[]; lectures: Lecture[]; onGenerate: () => void; onNavigate: (screen: AppScreen) => void }) {
+function StudyHomeScreen({ cards, quizzes, queue, weakPoints, lectures, onGenerate, onNavigate, onBack }: { cards: StudyCard[]; quizzes: QuizQuestion[]; queue: ReviewQueueItem[]; weakPoints: WeakPoint[]; lectures: Lecture[]; onGenerate: () => void; onNavigate: (screen: AppScreen) => void; onBack: () => void }) {
   const todayCount = cards.filter((card) => card.status === "new" || card.status === "weak" || card.status === "later").length + queue.length;
-  return <div className="space-y-5"><ScreenHeader eyebrow="Study" title="今日の復習" description="まずは「わからない」が付いた場所から復習しましょう。" /><GlassCard className="p-5"><div className="grid grid-cols-3 gap-2"><MiniStat label="今日" value={`${todayCount}`} /><MiniStat label="カード" value={`${cards.length}`} /><MiniStat label="小テスト" value={`${quizzes.length}`} /></div><div className="mt-4 grid gap-3"><GlassButton variant="primary" onClick={() => onNavigate("flashcards")}>復習カード開始</GlassButton><GlassButton onClick={() => onNavigate("quiz")}>小テスト開始</GlassButton><GlassButton onClick={() => onNavigate("examMode")}>テスト前モード</GlassButton></div></GlassCard><div className="grid grid-cols-2 gap-3"><GlassCard className="p-4"><h3 className="font-bold">未復習の講義</h3><p className="mt-2 text-3xl font-black">{lectures.filter((lecture) => lecture.summaryStatus === "not_started").length}</p></GlassCard><GlassCard className="p-4"><h3 className="font-bold">苦手項目</h3><p className="mt-2 text-3xl font-black">{weakPoints.length}</p></GlassCard></div><GlassCard solid className="p-4"><h3 className="text-lg font-bold">今日復習する項目</h3><div className="mt-3 space-y-2">{queue.slice(0, 5).length === 0 ? <EmptyState text="まだ復習が必要な講義はありません。" /> : queue.slice(0, 5).map((item) => <p key={item.id} className="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-700">{item.title}: {item.description}</p>)}</div></GlassCard><div className="grid grid-cols-2 gap-3"><GlassButton onClick={onGenerate}>復習カード生成</GlassButton><GlassButton onClick={() => onNavigate("weakPoints")}>苦手ポイント</GlassButton><GlassButton onClick={() => onNavigate("reminders")}>リマインダー</GlassButton><GlassButton onClick={() => onNavigate("keyTerms")}>重要語句</GlassButton></div></div>;
+  return <div className="space-y-5"><ScreenHeader eyebrow="Study" title="今日の復習" description="まずは「わからない」が付いた場所から復習しましょう。" onBack={onBack} /><GlassCard className="p-5"><div className="grid grid-cols-3 gap-2"><MiniStat label="今日" value={`${todayCount}`} /><MiniStat label="カード" value={`${cards.length}`} /><MiniStat label="小テスト" value={`${quizzes.length}`} /></div><div className="mt-4 grid gap-3"><GlassButton variant="primary" onClick={() => onNavigate("flashcards")}>復習カード開始</GlassButton><GlassButton onClick={() => onNavigate("quiz")}>小テスト開始</GlassButton><GlassButton onClick={() => onNavigate("examMode")}>テスト前モード</GlassButton></div></GlassCard><div className="grid grid-cols-2 gap-3"><GlassCard className="p-4"><h3 className="font-bold">未復習の講義</h3><p className="mt-2 text-3xl font-black">{lectures.filter((lecture) => lecture.summaryStatus === "not_started").length}</p></GlassCard><GlassCard className="p-4"><h3 className="font-bold">苦手項目</h3><p className="mt-2 text-3xl font-black">{weakPoints.length}</p></GlassCard></div><GlassCard solid className="p-4"><h3 className="text-lg font-bold">今日復習する項目</h3><div className="mt-3 space-y-2">{queue.slice(0, 5).length === 0 ? <EmptyState text="まだ復習が必要な講義はありません。" /> : queue.slice(0, 5).map((item) => <p key={item.id} className="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-700">{item.title}: {item.description}</p>)}</div></GlassCard><div className="grid grid-cols-2 gap-3"><GlassButton onClick={onGenerate}>復習カード生成</GlassButton><GlassButton onClick={() => onNavigate("weakPoints")}>苦手ポイント</GlassButton><GlassButton onClick={() => onNavigate("reminders")}>リマインダー</GlassButton><GlassButton onClick={() => onNavigate("keyTerms")}>重要語句</GlassButton></div></div>;
 }
 
-function FlashcardsScreen({ cards, activeIndex, showBack, onFlip, onStatus, onGenerate, onOpenLecture }: { cards: StudyCard[]; activeIndex: number; showBack: boolean; onFlip: () => void; onStatus: (cardId: string, status: StudyCard["status"]) => void; onGenerate: () => void; onOpenLecture: (lectureId: string, timestamp?: number) => void }) {
+function FlashcardsScreen({ cards, activeIndex, showBack, onFlip, onStatus, onGenerate, onOpenLecture, onBack }: { cards: StudyCard[]; activeIndex: number; showBack: boolean; onFlip: () => void; onStatus: (cardId: string, status: StudyCard["status"]) => void; onGenerate: () => void; onOpenLecture: (lectureId: string, timestamp?: number) => void; onBack: () => void }) {
   const card = cards[activeIndex];
-  if (!card) return <div className="space-y-5"><ScreenHeader eyebrow="Cards" title="復習カード" description="講義ノートからカードを作成します。" /><EmptyState text="まだ復習カードはありません。講義を文字起こしして、自動メモを生成すると復習カードを作れます。" /><GlassButton onClick={onGenerate} variant="primary">復習カードを生成</GlassButton></div>;
-  return <div className="space-y-5"><ScreenHeader eyebrow="Cards" title="復習カード" description={`${activeIndex + 1} / ${cards.length}`} /><button onClick={onFlip} className="w-full text-left"><GlassCard solid className="min-h-80 p-6"><p className="text-xs font-black uppercase tracking-[0.18em] text-violet-600">{showBack ? "Answer" : "Question"}</p><h3 className="mt-4 text-2xl font-bold leading-9 text-slate-950">{showBack ? card.back : card.front}</h3>{showBack && card.explanation ? <p className="mt-4 text-sm leading-7 text-slate-600">{card.explanation}</p> : null}{card.timestamp !== undefined ? <button onClick={(event) => { event.stopPropagation(); onOpenLecture(card.lectureId, card.timestamp); }} className="mt-5 rounded-full bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700">関連: {formatTimestamp(card.timestamp)}</button> : null}</GlassCard></button><div className="grid grid-cols-3 gap-2"><GlassButton onClick={() => onStatus(card.id, "known")}>わかった</GlassButton><GlassButton onClick={() => onStatus(card.id, "weak")}>まだ不安</GlassButton><GlassButton onClick={() => onStatus(card.id, "later")}>あとで</GlassButton></div></div>;
+  if (!card) return <div className="space-y-5"><ScreenHeader eyebrow="Cards" title="復習カード" description="講義ノートからカードを作成します。" onBack={onBack} /><EmptyState text="まだ復習カードはありません。講義を文字起こしして、自動メモを生成すると復習カードを作れます。" /><GlassButton onClick={onGenerate} variant="primary">復習カードを生成</GlassButton></div>;
+  return <div className="space-y-5"><ScreenHeader eyebrow="Cards" title="復習カード" description={`${activeIndex + 1} / ${cards.length}`} onBack={onBack} /><button onClick={onFlip} className="w-full text-left"><GlassCard solid className="min-h-80 p-6"><p className="text-xs font-black uppercase tracking-[0.18em] text-violet-600">{showBack ? "Answer" : "Question"}</p><h3 className="mt-4 text-2xl font-bold leading-9 text-slate-950">{showBack ? card.back : card.front}</h3>{showBack && card.explanation ? <p className="mt-4 text-sm leading-7 text-slate-600">{card.explanation}</p> : null}{card.timestamp !== undefined ? <button onClick={(event) => { event.stopPropagation(); onOpenLecture(card.lectureId, card.timestamp); }} className="mt-5 rounded-full bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700">関連: {formatTimestamp(card.timestamp)}</button> : null}</GlassCard></button><div className="grid grid-cols-3 gap-2"><GlassButton onClick={() => onStatus(card.id, "known")}>わかった</GlassButton><GlassButton onClick={() => onStatus(card.id, "weak")}>まだ不安</GlassButton><GlassButton onClick={() => onStatus(card.id, "later")}>あとで</GlassButton></div></div>;
 }
 
-function QuizScreen({ questions, activeIndex, selectedAnswer, onAnswer, onNext, onGenerate }: { questions: QuizQuestion[]; activeIndex: number; selectedAnswer: string | null; onAnswer: (answer: string) => void; onNext: () => void; onGenerate: () => void }) {
+function QuizScreen({ questions, activeIndex, selectedAnswer, onAnswer, onNext, onGenerate, onBack }: { questions: QuizQuestion[]; activeIndex: number; selectedAnswer: string | null; onAnswer: (answer: string) => void; onNext: () => void; onGenerate: () => void; onBack: () => void }) {
   const question = questions[activeIndex];
-  if (!question) return <div className="space-y-5"><ScreenHeader eyebrow="Quiz" title="小テスト" description="講義ノートから問題を作成します。" /><EmptyState text="まだ小テストがありません。自動メモを生成すると問題を作れます。" /><GlassButton onClick={onGenerate} variant="primary">小テストを生成</GlassButton></div>;
+  if (!question) return <div className="space-y-5"><ScreenHeader eyebrow="Quiz" title="小テスト" description="講義ノートから問題を作成します。" onBack={onBack} /><EmptyState text="まだ小テストがありません。自動メモを生成すると問題を作れます。" /><GlassButton onClick={onGenerate} variant="primary">小テストを生成</GlassButton></div>;
   const choices = question.choices ?? [question.answer];
-  return <div className="space-y-5"><ScreenHeader eyebrow="Quiz" title="小テスト" description={`${activeIndex + 1} / ${questions.length}`} /><GlassCard solid className="p-6"><StatusPill tone={question.difficulty === "hard" ? "rose" : question.difficulty === "normal" ? "amber" : "green"}>{question.difficulty}</StatusPill><h3 className="mt-4 text-xl font-bold leading-8 text-slate-950">{question.question}</h3><div className="mt-5 grid gap-2">{choices.map((choice) => <button key={choice} onClick={() => onAnswer(choice)} className={`rounded-2xl px-4 py-3 text-left text-sm font-bold ${selectedAnswer === choice ? choice === question.answer ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700" : "bg-slate-50 text-slate-700"}`}>{choice}</button>)}</div>{selectedAnswer ? <div className="mt-5 rounded-2xl bg-sky-50 p-4 text-sm leading-7 text-sky-900"><b>{selectedAnswer === question.answer ? "正解" : "不正解"}</b><br />{question.explanation}</div> : null}</GlassCard><GlassButton onClick={onNext} variant="primary">次の問題</GlassButton></div>;
+  return <div className="space-y-5"><ScreenHeader eyebrow="Quiz" title="小テスト" description={`${activeIndex + 1} / ${questions.length}`} onBack={onBack} /><GlassCard solid className="p-6"><StatusPill tone={question.difficulty === "hard" ? "rose" : question.difficulty === "normal" ? "amber" : "green"}>{question.difficulty}</StatusPill><h3 className="mt-4 text-xl font-bold leading-8 text-slate-950">{question.question}</h3><div className="mt-5 grid gap-2">{choices.map((choice) => <button key={choice} onClick={() => onAnswer(choice)} className={`rounded-2xl px-4 py-3 text-left text-sm font-bold ${selectedAnswer === choice ? choice === question.answer ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700" : "bg-slate-50 text-slate-700"}`}>{choice}</button>)}</div>{selectedAnswer ? <div className="mt-5 rounded-2xl bg-sky-50 p-4 text-sm leading-7 text-sky-900"><b>{selectedAnswer === question.answer ? "正解" : "不正解"}</b><br />{question.explanation}</div> : null}</GlassCard><GlassButton onClick={onNext} variant="primary">次の問題</GlassButton></div>;
 }
 
-function ExamModeScreen({ cards, questions, weakPoints, queue, courses, onOpenLecture }: { cards: StudyCard[]; questions: QuizQuestion[]; weakPoints: WeakPoint[]; queue: ReviewQueueItem[]; courses: Course[]; onOpenLecture: (lectureId: string, timestamp?: number) => void }) {
-  return <div className="space-y-5"><ScreenHeader eyebrow="Exam" title="テスト前モード" description="試験前に見るべき内容を優先度順にまとめます。" /><GlassCard className="p-5"><h3 className="text-lg font-bold">科目ごとの優先度</h3><div className="mt-3 space-y-2">{courses.map((course) => <p key={course.id} className="flex justify-between rounded-2xl bg-white/60 px-3 py-3 text-sm font-bold"><span>{course.name}</span><span>{course.examLikelyPointCount + course.confusingMarkerCount} pt</span></p>)}</div></GlassCard><GlassCard solid className="p-4"><h3 className="text-lg font-bold">テスト前に見るべき内容</h3><div className="mt-3 space-y-2">{[...queue.filter((item) => item.type === "exam_likely"), ...weakPoints.map((weak) => ({ id: weak.id, title: weak.title, description: weak.description, lectureId: weak.lectureId, timestamp: weak.timestamp }))].slice(0, 8).map((item) => <button key={item.id} onClick={() => onOpenLecture(item.lectureId, item.timestamp)} className="w-full rounded-2xl bg-slate-50 p-3 text-left text-sm leading-6 text-slate-700"><b>{item.title}</b><br />{item.description}</button>)}</div></GlassCard><div className="grid grid-cols-2 gap-3"><MiniStat label="カード" value={`${cards.length}`} /><MiniStat label="問題" value={`${questions.length}`} /></div></div>;
+function ExamModeScreen({ cards, questions, weakPoints, queue, courses, onOpenLecture, onBack }: { cards: StudyCard[]; questions: QuizQuestion[]; weakPoints: WeakPoint[]; queue: ReviewQueueItem[]; courses: Course[]; onOpenLecture: (lectureId: string, timestamp?: number) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Exam" title="テスト前モード" description="試験前に見るべき内容を優先度順にまとめます。" onBack={onBack} /><GlassCard className="p-5"><h3 className="text-lg font-bold">科目ごとの優先度</h3><div className="mt-3 space-y-2">{courses.map((course) => <p key={course.id} className="flex justify-between rounded-2xl bg-white/60 px-3 py-3 text-sm font-bold"><span>{course.name}</span><span>{course.examLikelyPointCount + course.confusingMarkerCount} pt</span></p>)}</div></GlassCard><GlassCard solid className="p-4"><h3 className="text-lg font-bold">テスト前に見るべき内容</h3><div className="mt-3 space-y-2">{[...queue.filter((item) => item.type === "exam_likely"), ...weakPoints.map((weak) => ({ id: weak.id, title: weak.title, description: weak.description, lectureId: weak.lectureId, timestamp: weak.timestamp }))].slice(0, 8).map((item) => <button key={item.id} onClick={() => onOpenLecture(item.lectureId, item.timestamp)} className="w-full rounded-2xl bg-slate-50 p-3 text-left text-sm leading-6 text-slate-700"><b>{item.title}</b><br />{item.description}</button>)}</div></GlassCard><div className="grid grid-cols-2 gap-3"><MiniStat label="カード" value={`${cards.length}`} /><MiniStat label="問題" value={`${questions.length}`} /></div></div>;
 }
 
-function WeakPointsScreen({ weakPoints, onOpenLecture, onAsk }: { weakPoints: WeakPoint[]; onOpenLecture: (lectureId: string, timestamp?: number) => void; onAsk: (lectureId: string) => void }) {
-  return <div className="space-y-5"><ScreenHeader eyebrow="Weak" title="苦手ポイント" description="わからないマーカーや「まだ不安」から優先復習する項目を集めます。" />{weakPoints.length === 0 ? <EmptyState text="苦手項目はまだありません。小テストや復習カードを使うと自動で表示されます。" /> : weakPoints.map((weak) => <GlassCard key={weak.id} solid className="p-4"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-950">{weak.title}</h3><StatusPill tone={weak.priority === "high" ? "rose" : "amber"}>{weak.priority}</StatusPill></div><p className="mt-2 text-sm leading-6 text-slate-600">{weak.description}</p><div className="mt-3 grid grid-cols-2 gap-2"><GlassButton onClick={() => onOpenLecture(weak.lectureId, weak.timestamp)}>文字起こしへ</GlassButton><GlassButton onClick={() => onAsk(weak.lectureId)}>AIに質問</GlassButton></div></GlassCard>)}</div>;
+function WeakPointsScreen({ weakPoints, onOpenLecture, onAsk, onBack }: { weakPoints: WeakPoint[]; onOpenLecture: (lectureId: string, timestamp?: number) => void; onAsk: (lectureId: string) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Weak" title="苦手ポイント" description="わからないマーカーや「まだ不安」から優先復習する項目を集めます。" onBack={onBack} />{weakPoints.length === 0 ? <EmptyState text="苦手項目はまだありません。小テストや復習カードを使うと自動で表示されます。" /> : weakPoints.map((weak) => <GlassCard key={weak.id} solid className="p-4"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-950">{weak.title}</h3><StatusPill tone={weak.priority === "high" ? "rose" : "amber"}>{weak.priority}</StatusPill></div><p className="mt-2 text-sm leading-6 text-slate-600">{weak.description}</p><div className="mt-3 grid grid-cols-2 gap-2"><GlassButton onClick={() => onOpenLecture(weak.lectureId, weak.timestamp)}>文字起こしへ</GlassButton><GlassButton onClick={() => onAsk(weak.lectureId)}>AIに質問</GlassButton></div></GlassCard>)}</div>;
 }
 
-function ReminderSettingsScreen({ settings, courses, onChange }: { settings: ReminderSettings; courses: Course[]; onChange: (settings: ReminderSettings) => void }) {
-  return <div className="space-y-5"><ScreenHeader eyebrow="Reminder" title="リマインダー設定" description="通知時間や科目ごとの復習設定を管理します。" /><GlassCard solid className="p-5"><div className="space-y-2"><ReminderToggle label="毎日復習する" checked={settings.dailyReview} onClick={() => onChange({ ...settings, dailyReview: !settings.dailyReview })} /><ReminderToggle label="講義後に復習する" checked={settings.afterLectureReview} onClick={() => onChange({ ...settings, afterLectureReview: !settings.afterLectureReview })} /><ReminderToggle label="テスト前に通知" checked={settings.beforeExam} onClick={() => onChange({ ...settings, beforeExam: !settings.beforeExam })} /><ReminderToggle label="未復習が溜まったら通知" checked={settings.notifyWhenBacklogGrows} onClick={() => onChange({ ...settings, notifyWhenBacklogGrows: !settings.notifyWhenBacklogGrows })} /><label className="block rounded-2xl bg-slate-50 p-3"><span className="text-xs font-bold text-slate-500">通知時間</span><input value={settings.notificationTime} onChange={(event) => onChange({ ...settings, notificationTime: event.target.value })} className="mt-1 w-full bg-transparent text-sm font-bold outline-none" /></label></div></GlassCard><GlassCard className="p-5"><h3 className="text-lg font-bold">科目ごとの復習設定</h3><div className="mt-3 space-y-2">{courses.map((course) => <ReminderToggle key={course.id} label={course.name} checked={settings.courseSettings[course.name] ?? true} onClick={() => onChange({ ...settings, courseSettings: { ...settings.courseSettings, [course.name]: !(settings.courseSettings[course.name] ?? true) } })} />)}</div></GlassCard></div>;
+function ReminderSettingsScreen({ settings, courses, onChange, onBack }: { settings: ReminderSettings; courses: Course[]; onChange: (settings: ReminderSettings) => void; onBack: () => void }) {
+  return <div className="space-y-5"><ScreenHeader eyebrow="Reminder" title="リマインダー設定" description="通知時間や科目ごとの復習設定を管理します。" onBack={onBack} /><GlassCard solid className="p-5"><div className="space-y-2"><ReminderToggle label="毎日復習する" checked={settings.dailyReview} onClick={() => onChange({ ...settings, dailyReview: !settings.dailyReview })} /><ReminderToggle label="講義後に復習する" checked={settings.afterLectureReview} onClick={() => onChange({ ...settings, afterLectureReview: !settings.afterLectureReview })} /><ReminderToggle label="テスト前に通知" checked={settings.beforeExam} onClick={() => onChange({ ...settings, beforeExam: !settings.beforeExam })} /><ReminderToggle label="未復習が溜まったら通知" checked={settings.notifyWhenBacklogGrows} onClick={() => onChange({ ...settings, notifyWhenBacklogGrows: !settings.notifyWhenBacklogGrows })} /><label className="block rounded-2xl bg-slate-50 p-3"><span className="text-xs font-bold text-slate-500">通知時間</span><input value={settings.notificationTime} onChange={(event) => onChange({ ...settings, notificationTime: event.target.value })} className="mt-1 w-full bg-transparent text-sm font-bold outline-none" /></label></div></GlassCard><GlassCard className="p-5"><h3 className="text-lg font-bold">科目ごとの復習設定</h3><div className="mt-3 space-y-2">{courses.map((course) => <ReminderToggle key={course.id} label={course.name} checked={settings.courseSettings[course.name] ?? true} onClick={() => onChange({ ...settings, courseSettings: { ...settings.courseSettings, [course.name]: !(settings.courseSettings[course.name] ?? true) } })} />)}</div></GlassCard></div>;
 }
 
 function ReminderToggle({ label, checked, onClick }: { label: string; checked: boolean; onClick: () => void }) {
-  return <button onClick={onClick} className="flex w-full items-center justify-between rounded-2xl bg-slate-50 px-3 py-3 text-left"><span className="text-sm font-bold text-slate-800">{label}</span><span className={`h-7 w-12 rounded-full p-1 ${checked ? "bg-sky-500" : "bg-slate-300"}`}><span className={`block h-5 w-5 rounded-full bg-white shadow transition ${checked ? "translate-x-5" : ""}`} /></span></button>;
+  return <button onClick={onClick} role="switch" aria-checked={checked} className="flex w-full items-center justify-between rounded-2xl bg-slate-50 px-3 py-3 text-left"><span className="text-sm font-bold text-slate-800">{label}</span><span className={`h-7 w-12 rounded-full p-1 ${checked ? "bg-sky-500" : "bg-slate-300"}`}><span className={`block h-5 w-5 rounded-full bg-white shadow transition ${checked ? "translate-x-5" : ""}`} /></span></button>;
 }
 
 function createChatMessage(role: "user" | "assistant", content: string, references?: ChatMessage["references"]): ChatMessage {
@@ -1188,10 +1236,15 @@ function EmptyState({ text }: { text: string }) {
 
 function highlightText(text: string, query: string) {
   if (!query.trim()) return text;
-  return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part) ? <mark key={i} className="rounded bg-yellow-200 px-0.5">{part}</mark> : part
+  );
 }
 
-function SettingsScreen({ audioMode, obsidianSettings, jobs, logs, lectures, onAudioModeChange, onObsidianSettingsChange, onAddJob, onCancelJob, onRefreshDiagnostics }: { audioMode: AudioMode; obsidianSettings: ObsidianSettings; jobs: Job[]; logs: AppLog[]; lectures: Lecture[]; onAudioModeChange: (audioMode: AudioMode) => void; onObsidianSettingsChange: (settings: ObsidianSettings) => void; onAddJob: (type: Job["type"], message: string) => void; onCancelJob: (jobId: string) => void; onRefreshDiagnostics: () => void }) {
+function SettingsScreen({ audioMode, obsidianSettings, llmSettings, jobs, logs, lectures, onAudioModeChange, onObsidianSettingsChange, onLlmSettingsChange, onAddJob, onCancelJob, onRefreshDiagnostics, onBack }: { audioMode: AudioMode; obsidianSettings: ObsidianSettings; llmSettings: LlmSettings; jobs: Job[]; logs: AppLog[]; lectures: Lecture[]; onAudioModeChange: (audioMode: AudioMode) => void; onObsidianSettingsChange: (settings: ObsidianSettings) => void; onLlmSettingsChange: (settings: LlmSettings) => void; onAddJob: (type: Job["type"], message: string) => void; onCancelJob: (jobId: string) => void; onRefreshDiagnostics: () => void; onBack: () => void }) {
   const updateObsidianSettings = (patch: Partial<ObsidianSettings>) => onObsidianSettingsChange({ ...obsidianSettings, ...patch });
   const [mobileSettings, setMobileSettings] = useState<Record<string, boolean>>({
     "録音後に文字起こし": true,
@@ -1202,7 +1255,7 @@ function SettingsScreen({ audioMode, obsidianSettings, jobs, logs, lectures, onA
 
   return (
     <div className="space-y-5">
-      <ScreenHeader eyebrow="Settings" title="学習環境の設定" description="録音、文字起こし、同期、復習、診断をカテゴリごとに整理しました。" />
+      <ScreenHeader eyebrow="Settings" title="学習環境の設定" description="録音、文字起こし、同期、復習、診断をカテゴリごとに整理しました。" onBack={onBack} />
       <SettingsSection title="録音" description="講義中に安心して使うための録音体験を調整します。">
         <SettingRow title="録音品質" desc="講義向け / mono / 安定優先" active />
         <SettingRow title="バックグラウンド録音" desc="モバイルdev buildで対応予定" />
@@ -1238,7 +1291,27 @@ function SettingsScreen({ audioMode, obsidianSettings, jobs, logs, lectures, onA
       </SettingsSection>
       <SettingsSection title="LLM / AI" description="AI回答の生成に使うバックエンドを選択します。">
         <SettingRow title="回答根拠" desc="文字起こし・要約・マーカーを優先" active />
-        <SettingRow title="Provider" desc="mock（現在）/ local / Ollama / OpenAI" />
+        <div className="space-y-2">
+          {([
+            ["mock", "モック（ダミー応答）"],
+            ["openai", "OpenAI"],
+            ["groq", "Groq（無料枠あり）"],
+            ["gemini", "Gemini（無料枠あり）"],
+            ["openrouter", "OpenRouter（無料枠あり）"],
+            ["ollama", "Ollama（ローカル）"],
+            ["local", "Local（互換API）"],
+          ] as const).map(([value, label]) => (
+            <SettingRow key={value} title={label} desc="" active={llmSettings.provider === value} onClick={() => {
+              const defaults = value !== "mock" ? providerDefaults[value as Exclude<LlmProvider, "mock">] : null;
+              onLlmSettingsChange({ ...llmSettings, provider: value as LlmProvider, endpoint: defaults?.endpoint ?? llmSettings.endpoint, model: defaults?.model ?? llmSettings.model });
+            }} />
+          ))}
+        </div>
+        {llmSettings.provider !== "mock" ? <>
+          <SettingInput label="API Key" value={llmSettings.apiKey} onChange={(value) => onLlmSettingsChange({ ...llmSettings, apiKey: value })} placeholder={llmSettings.provider === "ollama" || llmSettings.provider === "local" ? "不要（空欄でOK）" : "sk-..."} />
+          <SettingInput label="Endpoint" value={llmSettings.endpoint} onChange={(value) => onLlmSettingsChange({ ...llmSettings, endpoint: value })} placeholder={llmSettings.provider === "ollama" ? "http://localhost:11434/v1" : llmSettings.provider === "gemini" ? "https://generativelanguage.googleapis.com" : "https://api.openai.com/v1"} />
+          <SettingInput label="Model" value={llmSettings.model} onChange={(value) => onLlmSettingsChange({ ...llmSettings, model: value })} placeholder={llmSettings.provider === "openai" || llmSettings.provider === "openrouter" ? "gpt-4o-mini" : llmSettings.provider === "groq" ? "llama-3.3-70b-versatile" : llmSettings.provider === "gemini" ? "gemini-2.0-flash" : "llama3"} />
+        </> : null}
       </SettingsSection>
       <SettingsSection title="Obsidian設定">
         <SettingInput label="Vault name" value={obsidianSettings.vaultName} onChange={(value) => updateObsidianSettings({ vaultName: value })} placeholder="大学ノート" />
@@ -1323,9 +1396,6 @@ function SettingInput({ label, value, onChange, placeholder }: { label: string; 
 }
 
 function SettingToggle({ label, checked = true, onChange }: { label: string; checked?: boolean; onChange?: () => void }) {
-  return <button onClick={onChange} className="flex w-full items-center justify-between rounded-2xl bg-slate-50 px-3 py-3 text-left transition-all active:scale-[0.99]"><span className="text-sm font-bold text-slate-800">{label}</span><span className={`relative h-7 w-12 rounded-full shadow-inner transition-colors ${checked ? "bg-sky-500" : "bg-slate-300"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${checked ? "right-1" : "left-1"}`} /></span></button>;
+  return <button onClick={onChange} role="switch" aria-checked={checked} className="flex w-full items-center justify-between rounded-2xl bg-slate-50 px-3 py-3 text-left transition-all active:scale-[0.99]"><span className="text-sm font-bold text-slate-800">{label}</span><span className={`relative h-7 w-12 rounded-full shadow-inner transition-colors ${checked ? "bg-sky-500" : "bg-slate-300"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${checked ? "right-1" : "left-1"}`} /></span></button>;
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}

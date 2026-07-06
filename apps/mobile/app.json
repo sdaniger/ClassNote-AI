@@ -6,15 +6,27 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "classnote",
+    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": false,
+      "bundleIdentifier": "com.classnote.mobile",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "講義を録音するためにマイクを使用します。",
         "NSCameraUsageDescription": "Windows版とのQRペアリングのためにカメラを使用します。"
       }
     },
     "android": {
-      "permissions": ["RECORD_AUDIO", "CAMERA"]
+      "package": "com.classnote.mobile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "plugins": [
       [
@@ -22,7 +34,13 @@
         {
           "microphonePermission": "講義を録音するためにマイクを使用します。"
         }
-      ]
-    ]
+      ],
+      "./plugins/withAudioRouteFix"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_EXPO_PROJECT_ID"
+      }
+    }
   }
 }

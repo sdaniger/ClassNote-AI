@@ -44,7 +44,11 @@ export function loadLectures(): Lecture[] {
 
 export function saveLectures(lectures: Lecture[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LECTURES_STORAGE_KEY, JSON.stringify(lectures));
+  try {
+    window.localStorage.setItem(LECTURES_STORAGE_KEY, JSON.stringify(lectures));
+  } catch {
+    console.error("localStorage容量が不足しています。古い講義データを整理してください。");
+  }
 }
 
 export function createLecture(input: CreateLectureInput): Lecture {
@@ -108,7 +112,11 @@ export function loadMarkersByLecture(): Record<string, LectureMarker[]> {
 
 export function saveMarkersByLecture(markers: Record<string, LectureMarker[]>) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(MARKERS_STORAGE_KEY, JSON.stringify(markers));
+  try {
+    window.localStorage.setItem(MARKERS_STORAGE_KEY, JSON.stringify(markers));
+  } catch {
+    console.error("マーカーの保存に失敗しました。");
+  }
 }
 
 export function loadTranscriptByLecture(): Record<string, TranscriptSegment[]> {
@@ -118,7 +126,11 @@ export function loadTranscriptByLecture(): Record<string, TranscriptSegment[]> {
 
 export function saveTranscriptByLecture(transcripts: Record<string, TranscriptSegment[]>) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(TRANSCRIPT_STORAGE_KEY, JSON.stringify(transcripts));
+  try {
+    window.localStorage.setItem(TRANSCRIPT_STORAGE_KEY, JSON.stringify(transcripts));
+  } catch {
+    console.error("文字起こしの保存に失敗しました。");
+  }
 }
 
 function isStoredLecture(value: unknown): value is Lecture {
