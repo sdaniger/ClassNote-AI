@@ -31,26 +31,39 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Setup Expo (manual)
+        run: |
+          npm install -g eas-cli@latest
+          echo "EXPO_TOKEN=${{ secrets.EXPO_TOKEN }}" >> $GITHUB_ENV
 
-      - name: EAS version
-        run: eas --version
+      - name: Debug EAS
+        run: |
+          eas --version
+          eas whoami 2>&1
 
       - name: Build Android (preview APK)
-        run: eas build --platform android --profile preview --non-interactive --no-wait 2>&1 | tee /tmp/eas-output.txt
-        timeout-minutes: 5
+        run: |
+          eas build --platform android --profile preview --non-interactive --no-wait --json 2>&1 | tee /tmp/eas-output.json
+          echo "Exit code: $?"
+          cat /tmp/eas-output.json
 
-      - name: Upload EAS log on failure
-        if: failure()
+      - name: Upload EAS log
         uses: actions/upload-artifact@v4
         with:
-          name: eas-output
-          path: /tmp/eas-output.txt
+          name: eas-output.json
+          path: /tmp/eas-output.json
+
+      - name: Check builds via GraphQL
+        if: always()
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          curl -s "https://api.expo.dev/graphql" \
+            -H "Authorization: Bearer $EXPO_TOKEN" \
+            -H "Content-Type: application/json" \
+            --max-time 10 \
+            -d '{"query":"{app{byId(appId:\"d6a3a075-11cb-44f7-ab93-1d23d283e97e\"){builds(offset:0,limit:5){id platform status}}}}"}' | python3 -m json.tool
 
       - name: Build Android (production AAB)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        run: eas build --platform android --profile production --non-interactive --no-wait
+        if: false
+        run: echo "disabled"
