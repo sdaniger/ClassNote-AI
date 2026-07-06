@@ -40,14 +40,18 @@ jobs:
       - name: EAS version
         run: eas --version
 
-      - name: Build (capture output)
+      - name: Build
         run: |
           set -o pipefail
           eas build --platform android --profile preview --non-interactive --wait 2>&1 | tee /tmp/build.log
-          status=$?
-          echo "### Build Log" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat /tmp/build.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          exit $status
         timeout-minutes: 60
+
+      - name: Print build log
+        if: always()
+        run: |
+          echo "=== BUILD LOG ==="
+          cat /tmp/build.log 2>/dev/null || echo "(no log file)"
+          echo "=== STEP SUMMARY ==="
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
