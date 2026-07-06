@@ -41,8 +41,13 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_DEBUG: true
+          NODE_OPTIONS: "--unhandled-rejections=strict"
         run: |
+          ls -la /usr/local/bin/eas* /usr/bin/eas* ~/.* 2>/dev/null || true
+          node -e "try { require.resolve('eas-cli') } catch(e) { console.log('eas-cli not resolved') }" || true
+          node -e "console.log(process.versions)"
           eas build --platform android --profile preview --non-interactive --wait > /tmp/build.out 2>&1; rc=$?
+          echo "Exit code: $rc"
           {
             echo "### EAS Build Result"
             echo "Exit code: $rc"
@@ -52,4 +57,4 @@ jobs:
             echo '```'
           } >> $GITHUB_STEP_SUMMARY
           exit $rc
-        timeout-minutes: 60
+        timeout-minutes: 10
