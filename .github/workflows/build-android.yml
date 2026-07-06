@@ -31,30 +31,28 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Collect info
-        id: collect
-        continue-on-error: true
+      - name: Install EAS CLI globally
+        run: npm install -g eas-cli
+
+      - name: Build Android
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           {
-            echo "=== node version ==="
-            node -e "console.log(process.versions)"
-            echo "=== which eas ==="
-            which eas
-            echo "=== Directory ==="
-            pwd; ls -la
+            echo "=== eas version ==="
+            eas --version
             echo "=== eas whoami ==="
-            npx -y eas-cli@latest whoami
+            eas whoami
             echo "=== eas build ==="
-            npx -y eas-cli@latest build --platform android --profile preview --non-interactive --no-wait; echo "Exit: $?"
-          } > /tmp/build.out 2>&1
+            eas build --platform android --profile preview --non-interactive --wait; echo "Exit: $?"
+          } > /tmp/build.out 2>&1 || true
 
       - name: Upload output to dpaste
         if: always()
         run: |
-          curl -s -X POST "https://dpaste.com/api/v2/" \
+          URL=$(curl -s -X POST "https://dpaste.com/api/v2/" \
             -F "content=@/tmp/build.out" \
             -F "expiry_days=7" \
             -F "syntax=text" \
-            -w "\n"
+            -w "\n")
+          echo "Dpaste URL: $URL"
