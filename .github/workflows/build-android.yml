@@ -31,26 +31,8 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Install EAS CLI globally
-        run: npm install -g eas-cli
-
       - name: Build Android
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          > /tmp/build.out
-          echo "=== eas version ===" >> /tmp/build.out
-          eas --version >> /tmp/build.out 2>&1 || echo "eas_version_exit: $?" >> /tmp/build.out
-          echo "=== eas whoami ===" >> /tmp/build.out
-          eas whoami >> /tmp/build.out 2>&1 || echo "eas_whoami_exit: $?" >> /tmp/build.out
-          echo "=== eas build ===" >> /tmp/build.out
-          eas build --platform android --profile preview --non-interactive --wait >> /tmp/build.out 2>&1; echo "eas_build_exit: $?" >> /tmp/build.out
-          echo "=== done ===" >> /tmp/build.out
-
-      - name: Show output
-        if: always()
-        run: |
-          echo "File size: $(wc -c < /tmp/build.out)"
-          echo '```'
-          cat /tmp/build.out
-          echo '```'
+        run: eas build --platform android --profile preview --non-interactive --wait
+        timeout-minutes: 60

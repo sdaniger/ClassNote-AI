@@ -1,7 +1,8 @@
 {
   "cli": {
     "version": ">= 0.0.0",
-    "requireCommit": false
+    "requireCommit": false,
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -14,6 +15,7 @@
     },
     "preview": {
       "distribution": "internal",
+      "projectRootDirectory": "apps/mobile",
       "android": {
         "buildType": "apk"
       }
