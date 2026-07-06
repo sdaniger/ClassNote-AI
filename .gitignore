@@ -5,3 +5,7 @@ data/
 .env
 .env*.local
 
+# Expo generated native code
+apps/mobile/android/
+apps/mobile/ios/
+
