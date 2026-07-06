@@ -1,1 +1,1 @@
-export { colors, shadow } from "@shared/tokens";
+export { colors, shadow } from "../../shared/tokens";
