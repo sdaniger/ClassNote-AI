@@ -13,7 +13,8 @@ import { addLog } from "@/services/logger/logger";
 import { formatDurationMs } from "@/lib/formatTime";
 import { getAudioModeShortLabel } from "@/lib/lectureStore";
 import { useRecordingController } from "@/services/recording/useRecordingController";
-import type { AudioMode, Lecture, RecordingResult } from "@/types/lecture";
+import type { AudioMode, Lecture } from "@/types/lecture";
+import type { RecordingResult } from "@/services/recording/recordingService";
 
 export function RecordingScreen({ lecture, audioMode, onImport, onRecordingComplete, onBack, recordingActionsRef }: { lecture?: Lecture; audioMode: AudioMode; onImport: () => void; onRecordingComplete: (title: string, course: string, result: RecordingResult, audioMode: AudioMode) => Promise<void>; onBack: () => void; recordingActionsRef?: MutableRefObject<{ toggleRecording: () => void; addConfusedMarker: () => void } | null> }) {
   const ctrl = useRecordingController();

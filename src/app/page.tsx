@@ -20,7 +20,7 @@ import { loadJobs } from "@/services/jobs/jobStorage";
 import type { Job } from "@/services/jobs/jobTypes";
 import { addLog } from "@/services/logger/logger";
 import { loadLogs, type AppLog } from "@/services/logger/logStorage";
-import { ToastProvider } from "@/hooks/useToast";
+import { ToastProvider, useToast } from "@/hooks/useToast";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { ToastContainer } from "@/components/feedback/Toast";
 import { buildCourses, buildKeyTerms, buildReviewQueue, buildTags } from "@/services/search/studyCollections";
@@ -316,7 +316,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lectureId: lecture.id, noteJson: note, markdown }),
-      }).catch((err) => addLog({ level: "warn", area: "sync", message: `サーバー保存失敗: ${err instanceof Error ? err.message : err}` }));
+      }).catch((err) => addLog({ level: "warning", area: "sync", message: `サーバー保存失敗: ${err instanceof Error ? err.message : err}` }));
       setGenerationStep("completed");
       addToast({ type: "success", title: "自動メモを生成しました", message: lecture.title });
     } catch (error) {

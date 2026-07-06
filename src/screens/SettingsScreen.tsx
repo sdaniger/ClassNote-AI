@@ -8,8 +8,10 @@ import { SettingsSection } from "@/components/SettingsSection";
 import { audioModeOptions } from "@/lib/lectureStore";
 import { providerDefaults } from "@/lib/llm/llmSettings";
 import { copyableLogs } from "@/services/logger/logger";
-import type { AppLog, Job } from "@/services/jobs/jobTypes";
-import type { AudioMode, Lecture, LlmProvider, LlmSettings, ObsidianSettings } from "@/types/lecture";
+import type { Job } from "@/services/jobs/jobTypes";
+import type { AppLog } from "@/services/logger/logStorage";
+import type { AudioMode, Lecture, ObsidianSettings } from "@/types/lecture";
+import type { LlmProvider, LlmSettings } from "@/lib/llm/llmSettings";
 
 function SettingRow({ title, desc, active = false, onClick }: { title: string; desc: string; active?: boolean; onClick?: () => void }) {
   const Element = onClick ? "button" : "div";
