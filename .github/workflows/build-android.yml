@@ -42,16 +42,8 @@ jobs:
 
       - name: Build Android (preview APK)
         run: |
-          set -o pipefail
-          eas build --platform android --profile preview --non-interactive --wait 2>&1 | tee /tmp/eas-output.txt
+          eas build --platform android --profile preview --non-interactive --wait 2>&1
         timeout-minutes: 60
-
-      - name: Upload EAS log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: eas-output
-          path: /tmp/eas-output.txt
 
       - name: Build Android (production AAB)
         if: false
