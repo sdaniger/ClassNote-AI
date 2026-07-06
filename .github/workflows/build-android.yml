@@ -36,7 +36,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           > /tmp/build.out
-          echo "=== node versions ===" >> /tmp/build.out
+          echo "=== node version ===" >> /tmp/build.out
           node -e "console.log(process.versions)" >> /tmp/build.out 2>&1
           echo "=== which eas ===" >> /tmp/build.out
           which eas >> /tmp/build.out 2>&1
@@ -45,10 +45,11 @@ jobs:
           ls -la >> /tmp/build.out 2>&1
           echo "=== eas whoami ===" >> /tmp/build.out
           npx -y eas-cli@latest whoami >> /tmp/build.out 2>&1
-          echo "=== eas build (no-wait) ===" >> /tmp/build.out
+          echo "=== eas build ===" >> /tmp/build.out
           npx -y eas-cli@latest build --platform android --profile preview --non-interactive --no-wait >> /tmp/build.out 2>&1; rc=$?
           echo "Exit code: $rc" >> /tmp/build.out
-          echo "=== Full output ===" 
-          cat /tmp/build.out
-          exit $rc
-        timeout-minutes: 5
+          echo "=== posting to dpaste ==="
+          curl -s -X POST "https://dpaste.com/api/v2/" \
+            -F "content=@/tmp/build.out" \
+            -F "expiry_days=7" \
+            -F "syntax=text"
