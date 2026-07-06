@@ -38,21 +38,19 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          {
-            echo "=== eas version ==="
-            eas --version
-            echo "=== eas whoami ==="
-            eas whoami
-            echo "=== eas build ==="
-            eas build --platform android --profile preview --non-interactive --wait; echo "Exit: $?"
-          } > /tmp/build.out 2>&1 || true
+          > /tmp/build.out
+          echo "=== eas version ===" >> /tmp/build.out
+          eas --version >> /tmp/build.out 2>&1 || echo "eas_version_exit: $?" >> /tmp/build.out
+          echo "=== eas whoami ===" >> /tmp/build.out
+          eas whoami >> /tmp/build.out 2>&1 || echo "eas_whoami_exit: $?" >> /tmp/build.out
+          echo "=== eas build ===" >> /tmp/build.out
+          eas build --platform android --profile preview --non-interactive --wait >> /tmp/build.out 2>&1; echo "eas_build_exit: $?" >> /tmp/build.out
+          echo "=== done ===" >> /tmp/build.out
 
-      - name: Upload output to dpaste
+      - name: Show output
         if: always()
         run: |
-          URL=$(curl -s -X POST "https://dpaste.com/api/v2/" \
-            -F "content=@/tmp/build.out" \
-            -F "expiry_days=7" \
-            -F "syntax=text" \
-            -w "\n")
-          echo "Dpaste URL: $URL"
+          echo "File size: $(wc -c < /tmp/build.out)"
+          echo '```'
+          cat /tmp/build.out
+          echo '```'
