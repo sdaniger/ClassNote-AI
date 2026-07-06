@@ -12,9 +12,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/mobile
 
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +23,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-        working-directory: .
 
       - name: Typecheck
         run: npx tsc --noEmit
+        working-directory: apps/mobile
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -38,6 +35,11 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android (preview APK)
+        working-directory: apps/mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ github.workspace }}/apps/mobile
         run: |
           eas build --platform android --profile preview --non-interactive --wait 2>&1
         timeout-minutes: 60

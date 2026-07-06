@@ -36,7 +36,8 @@
         {
           "microphonePermission": "講義を録音するためにマイクを使用します。"
         }
-      ]
+      ],
+      "./plugins/withAudioRouteFix"
     ],
     "extra": {
       "eas": {
