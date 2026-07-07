@@ -58,15 +58,15 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Build APK (arm64-v8a)
+      - name: Build APK (arm64-v8a, release mode)
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: classnote-mobile-apk
-          path: apps/mobile/android/app/build/outputs/apk/**/*.apk
+          path: apps/mobile/android/app/build/outputs/apk/release/*.apk
           compression-level: 0
           retention-days: 14
 
@@ -82,4 +82,4 @@ jobs:
           gh release create "$VERSION" \
             --title "ClassNote Mobile $VERSION" \
             --notes "APK build from workflow dispatch" \
-            apps/mobile/android/app/build/outputs/apk/**/*.apk
+            apps/mobile/android/app/build/outputs/apk/release/*.apk
