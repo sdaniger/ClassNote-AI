@@ -79,7 +79,7 @@ async function genForeground(size, filepath) {
 async function genSplashLogo(size, filepath) {
   await sharp(bgSvg(size, size, 0))
     .composite([{ input: noteSvg(Math.round(size * 0.35)), top: Math.round(size * 0.325), left: Math.round(size * 0.325) }])
-    .webp({ lossless: true })
+    .png()
     .toFile(filepath)
 }
 
