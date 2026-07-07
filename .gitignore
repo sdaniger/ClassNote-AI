@@ -4,6 +4,7 @@ node_modules/
 data/
 .env
 .env*.local
+apps/mobile/.expo/
 
 # Expo generated native code
 apps/mobile/android/

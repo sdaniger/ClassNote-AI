@@ -1,0 +1,4 @@
+<resources>
+  <string name="app_name">ClassNote Mobile</string>
+  <string name="expo_runtime_version">expo</string>
+</resources>
